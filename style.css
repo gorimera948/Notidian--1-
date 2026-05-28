@@ -2969,6 +2969,78 @@ svg#cumulative-chart {
   cursor: pointer;
 }
 
+/* ==========================================
+   SIDEBAR DRAG & DROP BOUNDARY INDICATORS
+   ========================================== */
+.folder-header.dragover-before,
+.note-item.dragover-before {
+  position: relative;
+}
+.folder-header.dragover-before::before,
+.note-item.dragover-before::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent-primary, #8b5cf6);
+  box-shadow: 0 0 8px var(--accent-primary, #8b5cf6);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.folder-header.dragover-after,
+.note-item.dragover-after {
+  position: relative;
+}
+.folder-header.dragover-after::after,
+.note-item.dragover-after::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent-primary, #8b5cf6);
+  box-shadow: 0 0 8px var(--accent-primary, #8b5cf6);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.folder-header.dragover-inside {
+  background: rgba(139, 92, 246, 0.15) !important;
+  border-radius: 4px;
+}
+
+/* ==========================================
+   DATABASE CELLS NO-WRAP & HEIGHT PROTECTION
+   ========================================== */
+.notion-db-table td:not(.cell-type-date) .db-cell-edit,
+.notion-db-table td:not(.cell-type-date) {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Ensure select badges inside non-date td don't wrap and look beautiful */
+.notion-db-table td:not(.cell-type-date) .db-select-badge {
+  white-space: nowrap !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+}
+
+/* Allow Date cells to wrap nicely */
+.notion-db-table td.cell-type-date .db-cell-edit,
+.notion-db-table td.cell-type-date,
+.notion-db-table td.cell-type-date .db-date-span {
+  white-space: normal !important;
+  word-break: break-all !important;
+}
+
 
 
 

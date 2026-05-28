@@ -29,7 +29,8 @@ const state = {
   historyIndex: -1,
   draggedSidebarId: null, // ID of note or folder being dragged in sidebar
   draggedSidebarType: null, // 'note' | 'folder'
-  dropTargetSidebarId: null // ID of folder target being hovered
+  dropTargetSidebarId: null, // ID of folder target being hovered
+  collapsedFavorites: false
 };
 
 // ==========================================
@@ -201,6 +202,8 @@ const sampleNotes = [
 // ==========================================
 
 function initStorage() {
+  state.collapsedFavorites = localStorage.getItem('notidian_collapsed_favorites') === 'true';
+
   // Load Focus Logs
   try {
     const savedLogs = localStorage.getItem('notidian_focus_logs');
@@ -3186,7 +3189,7 @@ function getStatusClass(val) {
   return 'todo';
 }
 
-function getTagColor(val) {
+function getTagHashColor(val) {
   if (!val || val === '選択なし') return 'gray';
   const colors = ['red', 'blue', 'green', 'yellow', 'purple', 'pink', 'gray'];
   let hash = 0;
@@ -3194,6 +3197,15 @@ function getTagColor(val) {
     hash = val.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
+}
+
+function getTagColor(col, val) {
+  if (!val || val === '選択なし') return 'gray';
+  if (col && col.options) {
+    const opt = col.options.find(o => o.id === val || o.name === val);
+    if (opt && opt.color) return opt.color;
+  }
+  return getTagHashColor(val);
 }
 
 function getStatusOptionName(col, val) {
@@ -4022,13 +4034,58 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
   const thead = document.createElement('thead');
   const headerTr = document.createElement('tr');
   
-  // 削除用・一括選択用制御列のth（一括チェックは廃止してコンパクト化）
+  // 削除用・一括選択用制御列のth（全選択チェックボックスの復元・新設）
   const leftColWidth = block.properties.leftColWidth || 34;
   const controlTh = document.createElement('th');
   controlTh.className = 'db-row-controls-header';
   controlTh.style.width = `${leftColWidth}px`;
   controlTh.style.minWidth = `${leftColWidth}px`;
   controlTh.style.maxWidth = `${leftColWidth}px`;
+  controlTh.style.display = 'flex';
+  controlTh.style.alignItems = 'center';
+  controlTh.style.justifyContent = 'center';
+  controlTh.style.position = 'relative';
+
+  // 全選択チェックボックスの生成
+  const allCheck = document.createElement('input');
+  allCheck.type = 'checkbox';
+  allCheck.className = 'db-select-all-check';
+  allCheck.title = 'すべての行を選択/解除';
+  allCheck.style.cursor = 'pointer';
+  allCheck.style.margin = '0';
+  allCheck.style.width = '11px';
+  allCheck.style.height = '11px';
+  allCheck.style.accentColor = 'var(--accent-primary)';
+  
+  // 現在テーブル内の行がすべて選択されているかどうかで初期状態を設定
+  const isAllChecked = rowDataList.length > 0 && rowDataList.every(r => tableSelection.blockId === block.id && tableSelection.selectedRows.includes(r));
+  allCheck.checked = isAllChecked;
+
+  allCheck.addEventListener('change', (e) => {
+    e.stopPropagation();
+    const checked = e.target.checked;
+    
+    if (checked) {
+      tableSelection.blockId = block.id;
+      tableSelection.selectedRows = [...rowDataList];
+    } else {
+      tableSelection.blockId = null;
+      tableSelection.selectedRows = [];
+    }
+    
+    // テーブル内のすべてのチェックボックス状態を同期
+    table.querySelectorAll('.db-row-select-check').forEach(chk => {
+      chk.checked = checked;
+    });
+    
+    // 他のテーブルの全選択状態もクリア
+    document.querySelectorAll('.db-select-all-check').forEach(achk => {
+      if (achk !== allCheck) achk.checked = false;
+    });
+
+    updateBulkActionBar(block, rowDataList);
+  });
+  controlTh.appendChild(allCheck);
   
   // 左端列幅リサイザーの追加
   const leftResizer = document.createElement('div');
@@ -4163,6 +4220,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     tr.appendChild(controlTd);
     columns.forEach(col => {
       const td = document.createElement('td');
+      td.className = `cell-type-${col.type}`;
       const val = row[col.id] !== undefined ? row[col.id] : '';
       
       // 列幅の適用
@@ -4187,7 +4245,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
         td.appendChild(badge);
       } else if (col.type === 'select') {
         const badge = document.createElement('span');
-        badge.className = `db-select-badge db-tag-${getTagColor(val)}`;
+        badge.className = `db-select-badge db-tag-${getTagColor(col, val)}`;
         badge.textContent = val || '選択なし';
         badge.style.cursor = 'pointer';
         
@@ -5330,20 +5388,42 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
   existing.forEach(p => p.remove());
 
   const popover = document.createElement('div');
-  popover.className = 'db-floating-popover';
+  popover.className = 'db-floating-popover db-col-popover'; // 幅広にする
   popover.style.left = `${e.clientX}px`;
   popover.style.top = `${e.clientY + 12}px`;
 
+  const col = block.properties.columns.find(c => c.id === colId);
   const currentVal = block.properties.rows[rowIndex][colId] || '';
 
-  options.forEach(opt => {
+  // optionsを { id, name, color } のオブジェクト構造に正規化・自動変換
+  let tagOptions = [];
+  if (col) {
+    if (!col.options) col.options = [];
+    // もし古い文字列の配列だったらオブジェクトに変換
+    col.options = col.options.map(opt => {
+      if (typeof opt === 'string') {
+        return { id: opt, name: opt, color: getTagHashColor(opt) };
+      }
+      return opt;
+    });
+    tagOptions = col.options;
+  }
+
+  // 1. 選択肢リスト
+  const listTitle = document.createElement('div');
+  listTitle.style = 'font-size:10px; color:var(--text-muted); font-weight:600; padding:4px 6px;';
+  listTitle.textContent = 'タグを選択';
+  popover.appendChild(listTitle);
+
+  tagOptions.forEach(opt => {
     const item = document.createElement('div');
-    item.className = `db-popover-item ${currentVal === opt ? 'active' : ''}`;
-    item.innerHTML = `<span class="db-select-badge db-tag-${getTagColor(opt)}">${escapeHTML(opt)}</span>`;
+    const isAct = currentVal === opt.id || currentVal === opt.name;
+    item.className = `db-popover-item ${isAct ? 'active' : ''}`;
+    item.innerHTML = `<span class="db-select-badge db-tag-${opt.color || 'gray'}">${escapeHTML(opt.name)}</span>`;
     
     item.addEventListener('click', (evt) => {
       evt.stopPropagation();
-      block.properties.rows[rowIndex][colId] = opt;
+      block.properties.rows[rowIndex][colId] = opt.name;
       popover.remove();
       saveNotesToStorage();
       renderEditor();
@@ -5355,6 +5435,7 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
   divider.className = 'db-popover-divider';
   popover.appendChild(divider);
 
+  // 2. 新規タグ入力
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'db-popover-input';
@@ -5365,24 +5446,139 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       evt.preventDefault();
       evt.stopPropagation();
       const val = input.value.trim();
-      if (val && !options.includes(val)) {
-        options.push(val);
-        block.properties.rows[rowIndex][colId] = val;
-        
-        const col = block.properties.columns.find(c => c.id === colId);
-        if (col) col.options = options;
-
+      if (val) {
+        // 重複チェック
+        let found = tagOptions.find(o => o.name === val || o.id === val);
+        if (!found) {
+          found = { id: val, name: val, color: 'gray' };
+          tagOptions.push(found);
+          col.options = tagOptions;
+        }
+        block.properties.rows[rowIndex][colId] = found.name;
         popover.remove();
         saveNotesToStorage();
         renderEditor();
       }
     }
   });
-
   popover.appendChild(input);
+
+  const divider2 = document.createElement('div');
+  divider2.className = 'db-popover-divider';
+  popover.appendChild(divider2);
+
+  // 3. タグ管理セクション (色変更・並べ替え)
+  const configTitle = document.createElement('div');
+  configTitle.style = 'font-size:10px; color:var(--text-muted); font-weight:600; padding:4px 6px;';
+  configTitle.textContent = 'タグの管理（ドラッグして並べ替え）';
+  popover.appendChild(configTitle);
+
+  const configContainer = document.createElement('div');
+  configContainer.className = 'db-status-config-container';
+  popover.appendChild(configContainer);
+
+  tagOptions.forEach((opt, optIdx) => {
+    const row = document.createElement('div');
+    row.className = 'db-status-config-row';
+    row.setAttribute('data-id', opt.id);
+    
+    // ハンドル
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'db-status-drag-handle';
+    dragHandle.innerHTML = '<i class="fa-solid fa-grip-vertical"></i>';
+    dragHandle.style = 'cursor: grab; color: var(--text-muted); margin-right: 4px; font-size: 11px; display: flex; align-items: center;';
+    row.appendChild(dragHandle);
+
+    // カラー選択ドット
+    const colorDot = document.createElement('span');
+    colorDot.style = `display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent-${opt.color || 'muted'}); cursor:pointer; flex-shrink: 0; margin-right: 4px;`;
+    colorDot.title = '色を変更 (クリックして循環)';
+    colorDot.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      const colors = ['gray', 'red', 'blue', 'green', 'yellow', 'purple', 'pink'];
+      const curIdx = colors.indexOf(opt.color || 'gray');
+      opt.color = colors[(curIdx + 1) % colors.length];
+      saveNotesToStorage();
+      renderEditor();
+      showSelectTagPopover(e, block, rowIndex, colId, tagOptions); // リロード
+    });
+    row.appendChild(colorDot);
+
+    // 名前編集インプット
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'db-status-name-input';
+    nameInput.value = opt.name;
+    nameInput.addEventListener('blur', () => {
+      const val = nameInput.value.trim();
+      if (val && val !== opt.name) {
+        const oldName = opt.name;
+        opt.name = val;
+        opt.id = val; // IDも同期
+        // 行側の参照値も更新
+        block.properties.rows.forEach(r => {
+          if (r[colId] === oldName) r[colId] = val;
+        });
+        saveNotesToStorage();
+        renderEditor();
+      }
+    });
+    nameInput.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') {
+        evt.preventDefault();
+        nameInput.blur();
+      }
+    });
+    row.appendChild(nameInput);
+
+    // 削除ボタン
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-status-ctrl';
+    delBtn.style.color = 'var(--accent-secondary)';
+    delBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+    delBtn.title = '削除';
+    delBtn.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      if (confirm(`タグ「${opt.name}」を削除してもよろしいですか？`)) {
+        col.options = tagOptions.filter(o => o.id !== opt.id);
+        block.properties.rows.forEach(r => {
+          if (r[colId] === opt.name || r[colId] === opt.id) {
+            r[colId] = '';
+          }
+        });
+        saveNotesToStorage();
+        renderEditor();
+        showSelectTagPopover(e, block, rowIndex, colId, col.options); // リロード
+      }
+    });
+    row.appendChild(delBtn);
+
+    configContainer.appendChild(row);
+  });
+
+  popover.appendChild(configContainer);
+
   document.body.appendChild(popover);
-  
-  setTimeout(() => input.focus(), 50);
+
+  // Sortable.js の初期化
+  setTimeout(() => {
+    Sortable.create(configContainer, {
+      animation: 150,
+      handle: '.db-status-drag-handle',
+      onEnd: () => {
+        const newOptions = [];
+        const rows = configContainer.querySelectorAll('.db-status-config-row');
+        rows.forEach(r => {
+          const optId = r.getAttribute('data-id');
+          const foundOpt = tagOptions.find(o => o.id === optId);
+          if (foundOpt) newOptions.push(foundOpt);
+        });
+        col.options = newOptions;
+        saveNotesToStorage();
+      }
+    });
+    input.focus();
+  }, 50);
 }
 
 function showCalcOptionsPopover(e, block, col, calcTd, rowDataList = null) {
@@ -6143,6 +6339,12 @@ function renderNormalTree(normalNotes) {
     favHeader.style.gap = '6px';
     favHeader.style.marginTop = '8px';
     favHeader.style.marginBottom = '4px';
+    favHeader.style.cursor = 'pointer';
+
+    // キャレット（矢印）アイコンの追加
+    const caret = document.createElement('i');
+    caret.className = `fa-solid fa-caret-right caret-icon ${state.collapsedFavorites ? '' : 'open'}`;
+    favHeader.appendChild(caret);
 
     const starIcon = document.createElement('i');
     starIcon.className = 'fa-solid fa-star folder-icon';
@@ -6154,22 +6356,32 @@ function renderNormalTree(normalNotes) {
 
     favHeader.appendChild(starIcon);
     favHeader.appendChild(titleSpan);
+
+    // クリックで折りたたみをトグル
+    favHeader.addEventListener('click', (e) => {
+      state.collapsedFavorites = !state.collapsedFavorites;
+      localStorage.setItem('notidian_collapsed_favorites', state.collapsedFavorites);
+      renderNoteList();
+    });
+
     noteListContainer.appendChild(favHeader);
 
-    const favUl = document.createElement('ul');
-    favUl.className = 'favorite-notes-list';
-    favUl.style.listStyle = 'none';
-    favUl.style.margin = '0';
-    favUl.style.padding = '0';
+    if (!state.collapsedFavorites) {
+      const favUl = document.createElement('ul');
+      favUl.className = 'favorite-notes-list';
+      favUl.style.listStyle = 'none';
+      favUl.style.margin = '0';
+      favUl.style.padding = '0';
 
-    // sortIndexの降順でソートして描画
-    favoriteNotes.sort((a, b) => b.sortIndex - a.sortIndex);
-    favoriteNotes.forEach(note => {
-      const li = createNoteDOM(note, 1);
-      li.classList.add('favorite-note-item');
-      favUl.appendChild(li);
-    });
-    noteListContainer.appendChild(favUl);
+      // sortIndexの降順でソートして描画
+      favoriteNotes.sort((a, b) => b.sortIndex - a.sortIndex);
+      favoriteNotes.forEach(note => {
+        const li = createNoteDOM(note, 1);
+        li.classList.add('favorite-note-item');
+        favUl.appendChild(li);
+      });
+      noteListContainer.appendChild(favUl);
+    }
   }
 
   // --- 2. 通常のフォルダ・ノート一覧の描画 (混在してソート) ---
@@ -7221,10 +7433,20 @@ function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
     const selectCols = dbBlock.properties.columns.filter(c => c.type === 'select');
     selectCols.forEach(col => {
       if (!col.options) col.options = [];
-      if (!col.options.includes(taskName || '作業セッション')) {
-        col.options.push(taskName || '作業セッション');
+      col.options = col.options.map(opt => {
+        if (typeof opt === 'string') {
+          return { id: opt, name: opt, color: getTagHashColor(opt) };
+        }
+        return opt;
+      });
+      
+      const tagName = taskName || '作業セッション';
+      let found = col.options.find(o => o.name === tagName || o.id === tagName);
+      if (!found) {
+        found = { id: tagName, name: tagName, color: 'gray' };
+        col.options.push(found);
       }
-      targetRow[col.id] = taskName || '作業セッション';
+      targetRow[col.id] = tagName;
     });
     
     // 実績時間の書き込み（1以上限定）
@@ -7296,10 +7518,19 @@ function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
         newRow[col.id] = true;
       } else if (col.type === 'select') {
         if (!col.options) col.options = [];
-        if (!col.options.includes(taskName || '作業セッション')) {
-          col.options.push(taskName || '作業セッション');
+        col.options = col.options.map(opt => {
+          if (typeof opt === 'string') {
+            return { id: opt, name: opt, color: getTagHashColor(opt) };
+          }
+          return opt;
+        });
+        const tagName = taskName || '作業セッション';
+        let found = col.options.find(o => o.name === tagName || o.id === tagName);
+        if (!found) {
+          found = { id: tagName, name: tagName, color: 'gray' };
+          col.options.push(found);
         }
-        newRow[col.id] = taskName || '作業セッション';
+        newRow[col.id] = tagName;
       } else {
         newRow[col.id] = '';
       }
