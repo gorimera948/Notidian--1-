@@ -79,7 +79,7 @@ function undo() {
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
   const saveStatus = document.getElementById('save-status');
   if (saveStatus) {
-    saveStatus.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> 自動保存済み';
+    saveStatus.innerHTML = '';
     saveStatus.style.opacity = '1';
     setTimeout(() => {
       saveStatus.style.opacity = '0.7';
@@ -106,7 +106,7 @@ function redo() {
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
   const saveStatus = document.getElementById('save-status');
   if (saveStatus) {
-    saveStatus.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> 自動保存済み';
+    saveStatus.innerHTML = '';
     saveStatus.style.opacity = '1';
     setTimeout(() => {
       saveStatus.style.opacity = '0.7';
@@ -291,6 +291,13 @@ function initStorage() {
     state.folders = [];
   }
 
+  // フォルダの並び（sortIndex）をマイグレーション
+  state.folders.forEach((folder, idx) => {
+    if (folder.sortIndex === undefined) {
+      folder.sortIndex = folder.updatedAt || (Date.now() - idx * 1000);
+    }
+  });
+
   // Load Collapsed Folders
   try {
     const savedCollapsed = localStorage.getItem('notidian_collapsed_folders');
@@ -306,12 +313,19 @@ function initStorage() {
     state.collapsedFolders = [];
   }
 
+  // Load Daily Folder Id
+  state.dailyFolderId = localStorage.getItem('notidian_daily_folder_id') || null;
+
   // Notes properties migration & auto-repair
-  state.notes.forEach(note => {
+  state.notes.forEach((note, idx) => {
     if (note.folderId === undefined) note.folderId = null;
     if (note.isTemplate === undefined) note.isTemplate = false;
     if (note.templateSourceId === undefined) note.templateSourceId = null;
     if (note.isDailyDefault === undefined) note.isDailyDefault = false;
+    if (note.isFavorite === undefined) note.isFavorite = false;
+    if (note.sortIndex === undefined) {
+      note.sortIndex = note.updatedAt || (Date.now() - idx * 1000);
+    }
 
     // データベースブロックの修復 & マイグレーション
     if (note.blocks && Array.isArray(note.blocks)) {
@@ -366,9 +380,10 @@ function saveNotesToStorage() {
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
   localStorage.setItem('notidian_folders', JSON.stringify(state.folders));
   localStorage.setItem('notidian_collapsed_folders', JSON.stringify(state.collapsedFolders));
+  localStorage.setItem('notidian_daily_folder_id', state.dailyFolderId || '');
   const saveStatus = document.getElementById('save-status');
   if (saveStatus) {
-    saveStatus.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> 自動保存済み';
+    saveStatus.innerHTML = '';
     saveStatus.style.opacity = '1';
     setTimeout(() => {
       saveStatus.style.opacity = '0.7';
@@ -439,6 +454,41 @@ function renderEditor() {
   document.getElementById('note-title-input').value = note.title;
   document.getElementById('breadcrumb-note-title').textContent = note.title;
 
+  // お気に入り（星マーク）ボタンの動的生成と更新
+  const titleWrapper = document.querySelector('.note-title-wrapper');
+  if (titleWrapper) {
+    let favBtn = titleWrapper.querySelector('.btn-favorite-toggle');
+    if (!favBtn) {
+      favBtn = document.createElement('button');
+      favBtn.className = 'btn-favorite-toggle';
+      titleWrapper.appendChild(favBtn);
+    }
+    favBtn.className = `btn-favorite-toggle ${note.isFavorite ? 'active' : ''}`;
+    favBtn.innerHTML = `<i class="fa-${note.isFavorite ? 'solid' : 'regular'} fa-star"></i>`;
+    favBtn.title = note.isFavorite ? 'お気に入りから外す' : 'お気に入りに追加';
+    
+    // 重複リスナーを避けるためクローン置換（モック環境等へのフォールバック対応）
+    const newFavBtn = favBtn.cloneNode ? favBtn.cloneNode(true) : favBtn;
+    if (newFavBtn !== favBtn) {
+      newFavBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        note.isFavorite = !note.isFavorite;
+        saveNotesToStorage();
+        renderEditor();
+        renderNoteList();
+      });
+      titleWrapper.replaceChild(newFavBtn, favBtn);
+    } else {
+      favBtn.onclick = (e) => {
+        e.stopPropagation();
+        note.isFavorite = !note.isFavorite;
+        saveNotesToStorage();
+        renderEditor();
+        renderNoteList();
+      };
+    }
+  }
+
   // Clear canvas
   blockCanvas.innerHTML = '';
 
@@ -460,9 +510,9 @@ function renderEditor() {
   updateTimerTargetTableSelect();
 
   // Update template overwrite button
-  const editorActions = document.querySelector('.editor-actions');
-  if (editorActions) {
-    const oldBtn = editorActions.querySelector('.btn-overwrite-template');
+  const toolbarLeft = document.querySelector('.toolbar-left');
+  if (toolbarLeft) {
+    const oldBtn = toolbarLeft.querySelector('.btn-overwrite-template');
     if (oldBtn) oldBtn.remove();
 
     if (note.templateSourceId) {
@@ -475,7 +525,7 @@ function renderEditor() {
         overwriteBtn.addEventListener('click', () => {
           overwriteTemplateFromActiveDaily();
         });
-        editorActions.insertBefore(overwriteBtn, editorActions.firstChild);
+        toolbarLeft.appendChild(overwriteBtn);
       }
     }
   }
@@ -829,6 +879,7 @@ function createBlockControls(blockId, blockType = null) {
 
   const dragHandle = document.createElement('div');
   dragHandle.className = 'drag-handle';
+  dragHandle.setAttribute('draggable', 'true');
   dragHandle.title = 'ドラッグして並べ替え / 列作成';
   dragHandle.innerHTML = '<i class="fa-solid fa-grip-vertical"></i>';
 
@@ -2080,7 +2131,7 @@ const noteTitleInput = document.getElementById('note-title-input');
 
 function renderNoteList() {
   noteListContainer.innerHTML = '';
-  const searchVal = searchInput.value.toLowerCase().trim();
+  const searchVal = String(searchInput && searchInput.value || '').toLowerCase().trim();
 
   // テンプレートを除外したノート一覧
   const normalNotes = state.notes.filter(n => !n.isTemplate);
@@ -2114,7 +2165,6 @@ newNoteBtn.addEventListener('click', () => {
     title: '新規ノート',
     updatedAt: Date.now(),
     blocks: [
-      { id: generateId(), type: 'h1', content: '新規ノート' },
       { id: generateId(), type: 'p', content: '' }
     ]
   };
@@ -2332,6 +2382,7 @@ let raf = null;
 let remaining = 0, duration = 1, endTime = 0;
 let isRunning = false;
 let lastSec = null;
+let timerVolume = 0.5;
 
 // Initialize Pomodoro Data
 function loadPomodoroData() {
@@ -2353,11 +2404,13 @@ function loadPomodoroData() {
     console.error("Failed to parse pomodoro_presets:", e);
     presets = [];
   }
+  
+  timerVolume = parseFloat(localStorage.getItem("pomodoro_standalone_volume") || "0.5");
 
   // Prepopulate standard Pomodoro configurations if completely empty
   if (!Array.isArray(sets) || sets.length === 0) {
     sets = [
-      { name: '集中セッション (25分)', work: 25 * 60 * 1000, rest: 5 * 60 * 1000 },
+      { name: '作業セッション (25分)', work: 25 * 60 * 1000, rest: 5 * 60 * 1000 },
       { name: 'ショートブレイク (5分)', work: 5 * 60 * 1000, rest: 3 * 60 * 1000 },
       { name: 'テスト用 (10秒)', work: 10 * 1000, rest: 5 * 1000 }
     ];
@@ -2374,6 +2427,7 @@ function savePomodoroData() {
   localStorage.setItem("pomodoro_sets", JSON.stringify(sets));
   localStorage.setItem("pomodoro_schedule", JSON.stringify(schedule));
   localStorage.setItem("pomodoro_presets", JSON.stringify(presets));
+  localStorage.setItem("pomodoro_standalone_volume", timerVolume);
 }
 
 // Sets Manager
@@ -2570,7 +2624,7 @@ function renderPomodoro() {
       <div class="scheduleItem ${isActive ? 'active' : ''}">
         <div class="scheduleMain">
           <div class="schedule-name">${i + 1}. ${escapeHTML(s.name)}</div>
-          <div class="schedule-times">集中: ${formatMS(s.work)} / 休憩: ${formatMS(s.rest)}</div>
+          <div class="schedule-times">作業: ${formatMS(s.work)} / 休憩: ${formatMS(s.rest)}</div>
         </div>
         <button class="del" onclick="deleteSchedule(${i})">×</button>
       </div>`;
@@ -2752,8 +2806,9 @@ function beepSound() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const o = ctx.createOscillator();
     const g = ctx.createGain();
+    o.type = 'triangle'; // 三角波に変更し音圧を劇的向上！
     o.frequency.value = 600;
-    g.gain.setValueAtTime(0.08, ctx.currentTime);
+    g.gain.setValueAtTime(6.25 * timerVolume, ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.002, ctx.currentTime + 0.18);
     o.connect(g); g.connect(ctx.destination);
     o.start(); o.stop(ctx.currentTime + 0.18);
@@ -2767,8 +2822,9 @@ function endAlertSound() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const o = ctx.createOscillator();
     const g = ctx.createGain();
+    o.type = 'triangle'; // 三角波に変更し音圧を劇的向上！
     o.frequency.value = 750;
-    g.gain.setValueAtTime(0.1, ctx.currentTime);
+    g.gain.setValueAtTime(8.75 * timerVolume, ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.002, ctx.currentTime + 1.5);
     o.connect(g); g.connect(ctx.destination);
     o.start(); o.stop(ctx.currentTime + 1.5);
@@ -4968,8 +5024,6 @@ function showColumnConfigPopover(e, block, col) {
         <select id="col-date-mode-select" class="db-filter-val-select" style="width:100%;">
           <option value="date" ${col.dateDisplayMode === 'date' ? 'selected' : ''}>通常日付 (標準)</option>
           <option value="duration-days" ${col.dateDisplayMode === 'duration-days' ? 'selected' : ''}>経過日数 (〇〇日間)</option>
-          <option value="duration-hours" ${col.dateDisplayMode === 'duration-hours' ? 'selected' : ''}>経過時間 (〇〇時間)</option>
-          <option value="duration-minutes" ${col.dateDisplayMode === 'duration-minutes' ? 'selected' : ''}>経過分 (〇〇分)</option>
           <option value="remaining-days" ${col.dateDisplayMode === 'remaining-days' ? 'selected' : ''}>残り日数/期限</option>
         </select>
       `;
@@ -5407,7 +5461,6 @@ function createNoteInFolder(folderId) {
     updatedAt: Date.now(),
     isTemplate: false,
     blocks: [
-      { id: generateId(), type: 'h1', content: '新規ノート' },
       { id: generateId(), type: 'p', content: '' }
     ]
   };
@@ -5505,8 +5558,12 @@ function setupSidebarDragEvents(element, id, type) {
     state.draggedSidebarId = null;
     state.draggedSidebarType = null;
     state.dropTargetSidebarId = null;
+    state.dropTargetSidebarType = null;
+    state.sidebarDropLocation = null;
     hideSidebarPathPreview();
-    document.querySelectorAll('.folder-header').forEach(el => el.classList.remove('dragover-active'));
+    document.querySelectorAll('.folder-header, .note-item').forEach(el => {
+      el.classList.remove('dragover-active', 'dragover-inside', 'dragover-before', 'dragover-after');
+    });
   });
 
   element.addEventListener('dragover', (e) => {
@@ -5516,21 +5573,52 @@ function setupSidebarDragEvents(element, id, type) {
     if (state.draggedSidebarId === id) return;
     if (state.draggedSidebarType === 'folder' && isFolderDescendant(state.draggedSidebarId, id)) return;
 
+    // Y座標から「前（before）」「中（inside/folder限定）」「後（after）」を判定
+    const rect = element.getBoundingClientRect();
+    const yRatio = (e.clientY - rect.top) / rect.height;
+    let dropLocation = 'inside';
+
+    element.classList.remove('dragover-active', 'dragover-inside', 'dragover-before', 'dragover-after');
+
     if (type === 'folder') {
-      state.dropTargetSidebarId = id;
-      element.classList.add('dragover-active');
+      if (yRatio < 0.25) {
+        dropLocation = 'before';
+        element.classList.add('dragover-before');
+      } else if (yRatio > 0.75) {
+        dropLocation = 'after';
+        element.classList.add('dragover-after');
+      } else {
+        dropLocation = 'inside';
+        element.classList.add('dragover-inside');
+      }
+    } else {
+      if (yRatio < 0.5) {
+        dropLocation = 'before';
+        element.classList.add('dragover-before');
+      } else {
+        dropLocation = 'after';
+        element.classList.add('dragover-after');
+      }
+    }
+
+    state.dropTargetSidebarId = id;
+    state.dropTargetSidebarType = type;
+    state.sidebarDropLocation = dropLocation;
+
+    if (type === 'folder' && dropLocation === 'inside') {
       const pathStr = getFolderPathString(id);
       showSidebarPathPreview(`格納先: ${pathStr}`);
     } else {
-      state.dropTargetSidebarId = null;
-      showSidebarPathPreview(`移動先: 最上位 (ルート階層)`);
+      const targetName = type === 'folder' ? 
+        (state.folders.find(f => f.id === id)?.name || '') : 
+        (state.notes.find(n => n.id === id)?.title || '');
+      const actionText = dropLocation === 'before' ? 'の前' : 'の後';
+      showSidebarPathPreview(`移動先: ${targetName} ${actionText}`);
     }
   });
 
   element.addEventListener('dragleave', () => {
-    if (type === 'folder') {
-      element.classList.remove('dragover-active');
-    }
+    element.classList.remove('dragover-active', 'dragover-inside', 'dragover-before', 'dragover-after');
   });
 
   element.addEventListener('drop', (e) => {
@@ -5541,20 +5629,103 @@ function setupSidebarDragEvents(element, id, type) {
     const draggedId = state.draggedSidebarId;
     const draggedType = state.draggedSidebarType;
     const targetId = state.dropTargetSidebarId;
+    const targetType = state.dropTargetSidebarType;
+    const dropLocation = state.sidebarDropLocation || 'inside';
 
     if (!draggedId) return;
 
-    if (draggedType === 'note') {
-      const note = state.notes.find(n => n.id === draggedId);
-      if (note) {
-        note.folderId = targetId;
-        note.updatedAt = Date.now();
+    if (dropLocation === 'inside' && targetType === 'folder') {
+      // フォルダ内に格納
+      if (draggedType === 'note') {
+        const note = state.notes.find(n => n.id === draggedId);
+        if (note) {
+          note.folderId = targetId;
+          note.updatedAt = Date.now();
+          // フォルダ内の他のノート・サブフォルダの sortIndex の最大値より大きい値にする
+          const siblings = [
+            ...state.notes.filter(n => n.folderId === targetId).map(n => n.sortIndex || 0),
+            ...state.folders.filter(f => f.parentId === targetId).map(f => f.sortIndex || 0)
+          ];
+          const maxSort = siblings.length > 0 ? Math.max(...siblings) : Date.now();
+          note.sortIndex = maxSort + 1000;
+        }
+      } else if (draggedType === 'folder') {
+        const folder = state.folders.find(f => f.id === draggedId);
+        if (folder) {
+          folder.parentId = targetId;
+          folder.updatedAt = Date.now();
+          // フォルダ内の他のノート・サブフォルダの sortIndex の最大値より大きい値にする
+          const siblings = [
+            ...state.notes.filter(n => n.folderId === targetId).map(n => n.sortIndex || 0),
+            ...state.folders.filter(f => f.parentId === targetId).map(f => f.sortIndex || 0)
+          ];
+          const maxSort = siblings.length > 0 ? Math.max(...siblings) : Date.now();
+          folder.sortIndex = maxSort + 1000;
+        }
       }
-    } else if (draggedType === 'folder') {
-      const folder = state.folders.find(f => f.id === draggedId);
-      if (folder) {
-        folder.parentId = targetId;
-        folder.updatedAt = Date.now();
+    } else if (dropLocation === 'before' || dropLocation === 'after') {
+      // 直前または直後に並べ替え
+      let targetParentId = null;
+      if (targetType === 'note') {
+        const targetNote = state.notes.find(n => n.id === targetId);
+        if (targetNote) targetParentId = targetNote.folderId;
+      } else if (targetType === 'folder') {
+        const targetFolder = state.folders.find(f => f.id === targetId);
+        if (targetFolder) targetParentId = targetFolder.parentId;
+      }
+
+      // 親を設定
+      if (draggedType === 'note') {
+        const note = state.notes.find(n => n.id === draggedId);
+        if (note) {
+          note.folderId = targetParentId;
+          note.updatedAt = Date.now();
+        }
+      } else if (draggedType === 'folder') {
+        const folder = state.folders.find(f => f.id === draggedId);
+        if (folder) {
+          folder.parentId = targetParentId;
+          folder.updatedAt = Date.now();
+        }
+      }
+
+      // 親フォルダ内の全要素リストを取得してソート
+      const sameParentNotes = state.notes.filter(n => n.folderId === targetParentId);
+      const sameParentFolders = state.folders.filter(f => f.parentId === targetParentId);
+      const siblings = [
+        ...sameParentNotes.map(n => ({ id: n.id, type: 'note', sortIndex: n.sortIndex || 0 })),
+        ...sameParentFolders.map(f => ({ id: f.id, type: 'folder', sortIndex: f.sortIndex || 0 }))
+      ];
+      siblings.sort((a, b) => b.sortIndex - a.sortIndex);
+
+      // ドラッグ中要素を除いたリストでのターゲット位置を見つける
+      const filteredSiblings = siblings.filter(item => item.id !== draggedId);
+      const targetIdx = filteredSiblings.findIndex(item => item.id === targetId);
+
+      if (targetIdx !== -1) {
+        let newSort = 0;
+        if (dropLocation === 'before') {
+          if (targetIdx === 0) {
+            newSort = (filteredSiblings[0].sortIndex || 0) + 1000;
+          } else {
+            newSort = ((filteredSiblings[targetIdx - 1].sortIndex || 0) + (filteredSiblings[targetIdx].sortIndex || 0)) / 2;
+          }
+        } else if (dropLocation === 'after') {
+          if (targetIdx === filteredSiblings.length - 1) {
+            newSort = (filteredSiblings[targetIdx].sortIndex || 0) - 1000;
+          } else {
+            newSort = ((filteredSiblings[targetIdx].sortIndex || 0) + (filteredSiblings[targetIdx + 1].sortIndex || 0)) / 2;
+          }
+        }
+
+        // 新しい sortIndex を割り当て
+        if (draggedType === 'note') {
+          const note = state.notes.find(n => n.id === draggedId);
+          if (note) note.sortIndex = newSort;
+        } else if (draggedType === 'folder') {
+          const folder = state.folders.find(f => f.id === draggedId);
+          if (folder) folder.sortIndex = newSort;
+        }
       }
     }
 
@@ -5621,6 +5792,40 @@ function createFolderDOM(folder, normalNotes, depth) {
   const actions = document.createElement('div');
   actions.className = 'folder-actions';
 
+  const renameBtn = document.createElement('button');
+  renameBtn.className = 'btn-folder-action';
+  renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+  renameBtn.title = '名前を変更';
+  renameBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'folder-rename-input';
+    input.value = folder.name;
+    folderHeader.replaceChild(input, nameSpan);
+    input.focus();
+    input.select();
+
+    const saveName = () => {
+      const val = input.value.trim();
+      if (val) {
+        folder.name = val;
+        folder.updatedAt = Date.now();
+        saveNotesToStorage();
+        renderNoteList();
+      } else {
+        folderHeader.replaceChild(nameSpan, input);
+      }
+    };
+
+    input.addEventListener('blur', saveName);
+    input.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') saveName();
+      if (evt.key === 'Escape') folderHeader.replaceChild(nameSpan, input);
+    });
+  });
+  actions.appendChild(renameBtn);
+
   const addNoteBtn = document.createElement('button');
   addNoteBtn.className = 'btn-folder-action';
   addNoteBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
@@ -5666,15 +5871,21 @@ function createFolderDOM(folder, normalNotes, depth) {
     childrenUl.style.display = 'block';
 
     const subFolders = state.folders.filter(f => f.parentId === folder.id);
-    subFolders.sort((a, b) => b.updatedAt - a.updatedAt);
-    subFolders.forEach(sub => {
-      childrenUl.appendChild(createFolderDOM(sub, normalNotes, depth + 1));
-    });
-
     const subNotes = normalNotes.filter(n => n.folderId === folder.id);
-    subNotes.sort((a, b) => b.updatedAt - a.updatedAt);
-    subNotes.forEach(note => {
-      childrenUl.appendChild(createNoteDOM(note, depth + 1));
+
+    const mixedList = [
+      ...subFolders.map(f => ({ type: 'folder', data: f, sortIndex: f.sortIndex || 0 })),
+      ...subNotes.map(n => ({ type: 'note', data: n, sortIndex: n.sortIndex || 0 }))
+    ];
+
+    mixedList.sort((a, b) => b.sortIndex - a.sortIndex);
+
+    mixedList.forEach(item => {
+      if (item.type === 'folder') {
+        childrenUl.appendChild(createFolderDOM(item.data, normalNotes, depth + 1));
+      } else {
+        childrenUl.appendChild(createNoteDOM(item.data, depth + 1));
+      }
     });
   }
 
@@ -5688,19 +5899,108 @@ function createNoteDOM(note, depth) {
   li.setAttribute('draggable', 'true');
   li.style.paddingLeft = `${depth * 12 + 16}px`;
 
-  li.innerHTML = `
-    <i class="fa-regular fa-file-lines note-item-icon"></i>
-    <span class="note-title">${escapeHTML(note.title)}</span>
-    <button class="btn-delete-note" title="削除"><i class="fa-solid fa-trash-can"></i></button>
-  `;
+  // お気に入り状態に応じたクラスの付与
+  const favStar = document.createElement('button');
+  favStar.className = `btn-fav-star ${note.isFavorite ? 'active' : ''}`;
+  favStar.innerHTML = `<i class="fa-${note.isFavorite ? 'solid' : 'regular'} fa-star"></i>`;
+  favStar.title = note.isFavorite ? 'お気に入りから外す' : 'お気に入りに追加';
+  
+  favStar.addEventListener('click', (e) => {
+    e.stopPropagation();
+    note.isFavorite = !note.isFavorite;
+    saveNotesToStorage();
+    renderNoteList();
+    renderEditor();
+  });
+
+  // 名称変更ペンボタン
+  const renameBtn = document.createElement('button');
+  renameBtn.className = 'btn-rename-sidebar';
+  renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+  renameBtn.title = '名前を変更';
+  renameBtn.style.background = 'none';
+  renameBtn.style.border = 'none';
+  renameBtn.style.cursor = 'pointer';
+  renameBtn.style.opacity = '0';
+  renameBtn.style.transition = 'opacity 0.15s ease';
+  renameBtn.style.marginRight = '4px';
+  renameBtn.style.fontSize = '10px';
+  renameBtn.style.color = 'var(--text-muted, #6b7280)';
+
+  // liにホバーしたときにペンボタンを表示させるためのスタイルをインライン追加
+  li.addEventListener('mouseenter', () => {
+    renameBtn.style.opacity = '0.7';
+  });
+  li.addEventListener('mouseleave', () => {
+    renameBtn.style.opacity = '0';
+  });
+  renameBtn.addEventListener('mouseenter', () => {
+    renameBtn.style.opacity = '1';
+    renameBtn.style.color = 'var(--accent-primary)';
+  });
+  renameBtn.addEventListener('mouseleave', () => {
+    renameBtn.style.opacity = '0.7';
+    renameBtn.style.color = 'var(--text-muted)';
+  });
+
+  const icon = document.createElement('i');
+  icon.className = 'fa-regular fa-file-lines note-item-icon';
+
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'note-title';
+  titleSpan.textContent = note.title;
+
+  renameBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'note-rename-input';
+    input.value = note.title;
+    li.replaceChild(input, titleSpan);
+    input.focus();
+    input.select();
+
+    const saveName = () => {
+      const val = input.value.trim();
+      if (val) {
+        note.title = val;
+        note.updatedAt = Date.now();
+        saveNotesToStorage();
+        renderNoteList();
+        const activeNote = getActiveNote();
+        if (activeNote && activeNote.id === note.id) {
+          renderEditor();
+        }
+      } else {
+        li.replaceChild(titleSpan, input);
+      }
+    };
+
+    input.addEventListener('blur', saveName);
+    input.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') saveName();
+      if (evt.key === 'Escape') li.replaceChild(titleSpan, input);
+    });
+  });
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn-delete-note';
+  delBtn.title = '削除';
+  delBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+  delBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    deleteNote(note.id);
+  });
+
+  li.appendChild(icon);
+  li.appendChild(titleSpan);
+  li.appendChild(favStar);
+  li.appendChild(renameBtn);
+  li.appendChild(delBtn);
 
   li.addEventListener('click', (e) => {
-    if (e.target.closest('.btn-delete-note')) {
-      e.stopPropagation();
-      deleteNote(note.id);
-    } else {
-      navigateToNote(note.id);
-    }
+    if (e.target.closest('button') || e.target.closest('input')) return;
+    navigateToNote(note.id);
   });
 
   setupSidebarDragEvents(li, note.id, 'note');
@@ -5775,6 +6075,10 @@ function createSearchNoteDOM(note, searchVal, depth) {
       e.stopPropagation();
       deleteNote(note.id);
     } else {
+      if (searchInput) {
+        searchInput.value = '';
+        renderNoteList();
+      }
       navigateToNote(note.id);
     }
   });
@@ -5828,18 +6132,63 @@ function renderSearchTree(normalNotes, searchVal) {
 }
 
 function renderNormalTree(normalNotes) {
+  // --- 1. お気に入り（Starred）セクションの描画 ---
+  const favoriteNotes = normalNotes.filter(n => n.isFavorite);
+  if (favoriteNotes.length > 0) {
+    const favHeader = document.createElement('div');
+    favHeader.className = 'folder-header favorite-section-header';
+    favHeader.style.paddingLeft = '6px';
+    favHeader.style.display = 'flex';
+    favHeader.style.alignItems = 'center';
+    favHeader.style.gap = '6px';
+    favHeader.style.marginTop = '8px';
+    favHeader.style.marginBottom = '4px';
+
+    const starIcon = document.createElement('i');
+    starIcon.className = 'fa-solid fa-star folder-icon';
+    starIcon.style.color = '#fff9c4'; // プレミアムなゴールド
+
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'folder-name';
+    titleSpan.textContent = 'お気に入り';
+
+    favHeader.appendChild(starIcon);
+    favHeader.appendChild(titleSpan);
+    noteListContainer.appendChild(favHeader);
+
+    const favUl = document.createElement('ul');
+    favUl.className = 'favorite-notes-list';
+    favUl.style.listStyle = 'none';
+    favUl.style.margin = '0';
+    favUl.style.padding = '0';
+
+    // sortIndexの降順でソートして描画
+    favoriteNotes.sort((a, b) => b.sortIndex - a.sortIndex);
+    favoriteNotes.forEach(note => {
+      const li = createNoteDOM(note, 1);
+      li.classList.add('favorite-note-item');
+      favUl.appendChild(li);
+    });
+    noteListContainer.appendChild(favUl);
+  }
+
+  // --- 2. 通常のフォルダ・ノート一覧の描画 (混在してソート) ---
   const rootFolders = state.folders.filter(f => !f.parentId);
   const rootNotes = normalNotes.filter(n => !n.folderId);
 
-  rootFolders.sort((a, b) => b.updatedAt - a.updatedAt);
-  rootNotes.sort((a, b) => b.updatedAt - a.updatedAt);
+  const mixedList = [
+    ...rootFolders.map(f => ({ type: 'folder', data: f, sortIndex: f.sortIndex || 0 })),
+    ...rootNotes.map(n => ({ type: 'note', data: n, sortIndex: n.sortIndex || 0 }))
+  ];
 
-  rootFolders.forEach(folder => {
-    noteListContainer.appendChild(createFolderDOM(folder, normalNotes, 0));
-  });
+  mixedList.sort((a, b) => b.sortIndex - a.sortIndex);
 
-  rootNotes.forEach(note => {
-    noteListContainer.appendChild(createNoteDOM(note, 0));
+  mixedList.forEach(item => {
+    if (item.type === 'folder') {
+      noteListContainer.appendChild(createFolderDOM(item.data, normalNotes, 0));
+    } else {
+      noteListContainer.appendChild(createNoteDOM(item.data, 0));
+    }
   });
 }
 
@@ -6255,12 +6604,11 @@ function createDailyNote() {
   const newNote = {
     id: 'note-' + generateId(),
     title: titleStr,
-    folderId: null,
+    folderId: state.dailyFolderId || null,
     updatedAt: Date.now(),
     isTemplate: false,
     templateSourceId: defaultTemplate ? defaultTemplate.id : null,
     blocks: defaultTemplate ? structuredClone(defaultTemplate.blocks) : [
-      { id: generateId(), type: 'h1', content: `${titleStr} デイリーノート 📅` },
       { id: generateId(), type: 'p', content: '今日の作業ログやメモを記入しましょう。' }
     ]
   };
@@ -6377,6 +6725,46 @@ function showTemplatesPopover(e) {
     });
   }
 
+  // デイリーフォルダー設定セクションの描画
+  const dailySection = document.createElement('div');
+  dailySection.className = 'daily-folder-popover-section';
+  dailySection.style.padding = '8px 10px';
+  dailySection.style.marginTop = '4px';
+  dailySection.style.borderTop = '1px solid var(--border-color, #e5e7eb)';
+
+  const dailyLabel = document.createElement('label');
+  dailyLabel.style = 'font-size: 10px; color: var(--text-muted); font-weight: 700; display: block; margin-bottom: 4px;';
+  dailyLabel.innerHTML = '<i class="fa-regular fa-folder"></i> デイリー自動格納フォルダ';
+  dailySection.appendChild(dailyLabel);
+
+  const selectEl = document.createElement('select');
+  selectEl.className = 'daily-folder-popover-select';
+  selectEl.style = 'width: 100%; padding: 4px; font-size: 11px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;';
+  selectEl.innerHTML = '<option value="">ルート階層 (フォルダなし)</option>';
+
+  const addFolderOptions = (foldersList, parentId, depth) => {
+    const currentFolders = foldersList.filter(f => f.parentId === parentId);
+    currentFolders.sort((a, b) => b.sortIndex - a.sortIndex);
+    currentFolders.forEach(folder => {
+      const opt = document.createElement('option');
+      opt.value = folder.id;
+      opt.textContent = '\u00A0\u00A0'.repeat(depth) + folder.name;
+      selectEl.appendChild(opt);
+      addFolderOptions(foldersList, folder.id, depth + 1);
+    });
+  };
+  addFolderOptions(state.folders, null, 0);
+
+  selectEl.value = state.dailyFolderId || '';
+
+  selectEl.addEventListener('change', (evt) => {
+    state.dailyFolderId = evt.target.value || null;
+    saveNotesToStorage();
+  });
+
+  dailySection.appendChild(selectEl);
+  popover.appendChild(dailySection);
+
   document.body.appendChild(popover);
 }
 
@@ -6399,6 +6787,16 @@ window.addEventListener('DOMContentLoaded', () => {
   if (pomodoroToggle) {
     pomodoroToggle.addEventListener('click', () => {
       pomodoroToggle.classList.toggle('collapsed');
+    });
+  }
+
+  // Volume Slider の初期化とイベントバインド
+  const volumeSlider = document.getElementById('volumeSlider');
+  if (volumeSlider) {
+    volumeSlider.value = timerVolume;
+    volumeSlider.addEventListener('input', (evt) => {
+      timerVolume = parseFloat(evt.target.value);
+      savePomodoroData();
     });
   }
 
@@ -6680,7 +7078,10 @@ function insertPomodoroStartToActiveTable(taskName, durationMs) {
 
   // 1. 分(Minutes)を表す列の特定
   const minTextCol = dbBlock.properties.columns.find(c => c.type === 'text' && (c.name.includes('実行') || c.name.includes('作業') || c.name.includes('集中時間') || c.name.includes('経過分') || c.name.includes('実績分') || c.name === '分'));
-  const minNumCol = dbBlock.properties.columns.find(c => c.type === 'number' && (c.name.includes('実行') || c.name.includes('作業') || c.name.includes('集中時間') || c.name.includes('経過分') || c.name.includes('実績分') || c.name === '分'));
+  let minNumCol = dbBlock.properties.columns.find(c => c.type === 'number' && (c.name.includes('実行') || c.name.includes('作業') || c.name.includes('集中時間') || c.name.includes('経過分') || c.name.includes('実績分') || c.name === '分'));
+  if (!minNumCol) {
+    minNumCol = dbBlock.properties.columns.find(c => c.type === 'number');
+  }
 
   // 2. 時間(Hours)を表す列の特定
   const hourTextCol = dbBlock.properties.columns.find(c => c.type === 'text' && (c.name.includes('経過時間') || c.name.includes('実績時間') || c.name.includes('集中時間(h)') || c.name === '時間' || c.name.toLowerCase() === 'hour' || c.name.toLowerCase() === 'hours' || c.name.toLowerCase() === 'h'));
@@ -6705,8 +7106,8 @@ function insertPomodoroStartToActiveTable(taskName, durationMs) {
       } else if (col.id === dayTextCol?.id) {
         const valDay = parseFloat((durationMin / 1440).toFixed(3));
         newRow[col.id] = valDay >= 1.0 ? `${valDay}日間` : '';
-      } else if (!colName.includes('開始') && !colName.includes('終了') && !colName.includes('実行') && !colName.includes('作業') && !colName.includes('集中時間') && !colName.includes('経過') && !colName.includes('実績') && col.id !== 'col-title') {
-        newRow[col.id] = taskName || '集中セッション';
+      } else if (col.id === 'col-title' || (!colName.includes('開始') && !colName.includes('終了') && !colName.includes('実行') && !colName.includes('作業') && !colName.includes('集中時間') && !colName.includes('経過') && !colName.includes('実績') && col.type === 'text')) {
+        newRow[col.id] = taskName || '作業セッション';
       } else {
         newRow[col.id] = '';
       }
@@ -6727,6 +7128,12 @@ function insertPomodoroStartToActiveTable(taskName, durationMs) {
     } else if (col.type === 'status') {
       const progressOpt = col.options && col.options.find(o => o.name === '進行中' || o.id === 'opt-progress');
       newRow[col.id] = progressOpt ? progressOpt.id : '進行中';
+    } else if (col.type === 'select') {
+      if (!col.options) col.options = [];
+      if (!col.options.includes(taskName || '作業セッション')) {
+        col.options.push(taskName || '作業セッション');
+      }
+      newRow[col.id] = taskName || '作業セッション';
     } else if (col.type === 'checkbox') {
       newRow[col.id] = false;
     } else {
@@ -6765,7 +7172,10 @@ function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
 
   // 1. 分(Minutes)を表す列の特定
   const minTextCol = dbBlock.properties.columns.find(c => c.type === 'text' && (c.name.includes('実行') || c.name.includes('作業') || c.name.includes('集中時間') || c.name.includes('経過分') || c.name.includes('実績分') || c.name === '分'));
-  const minNumCol = dbBlock.properties.columns.find(c => c.type === 'number' && (c.name.includes('実行') || c.name.includes('作業') || c.name.includes('集中時間') || c.name.includes('経過分') || c.name.includes('実績分') || c.name === '分'));
+  let minNumCol = dbBlock.properties.columns.find(c => c.type === 'number' && (c.name.includes('実行') || c.name.includes('作業') || c.name.includes('集中時間') || c.name.includes('経過分') || c.name.includes('実績分') || c.name === '分'));
+  if (!minNumCol) {
+    minNumCol = dbBlock.properties.columns.find(c => c.type === 'number');
+  }
 
   // 2. 時間(Hours)を表す列の特定
   const hourTextCol = dbBlock.properties.columns.find(c => c.type === 'text' && (c.name.includes('経過時間') || c.name.includes('実績時間') || c.name.includes('集中時間(h)') || c.name === '時間' || c.name.toLowerCase() === 'hour' || c.name.toLowerCase() === 'hours' || c.name.toLowerCase() === 'h'));
@@ -6784,7 +7194,7 @@ function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
     // 開始時間が結合された日付にも部分一致（前方一致）でマッチさせる
     const isToday = !dateCol || String(row[dateCol.id] || '').startsWith(todayString);
     const isProgress = !statusCol || row[statusCol.id] === progressOptId || row[statusCol.id] === '進行中';
-    const isTitleMatch = !titleCol || row[titleCol.id] === (taskName || '集中セッション');
+    const isTitleMatch = !titleCol || row[titleCol.id] === (taskName || '作業セッション');
 
     if (isToday && isProgress && isTitleMatch) {
       targetRow = row;
@@ -6806,6 +7216,16 @@ function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
     if (endCol) {
       targetRow[endCol.id] = endTimeStr;
     }
+    
+    // セレクトタグ列にテキスト（作業名）と同じタグを自動挿入
+    const selectCols = dbBlock.properties.columns.filter(c => c.type === 'select');
+    selectCols.forEach(col => {
+      if (!col.options) col.options = [];
+      if (!col.options.includes(taskName || '作業セッション')) {
+        col.options.push(taskName || '作業セッション');
+      }
+      targetRow[col.id] = taskName || '作業セッション';
+    });
     
     // 実績時間の書き込み（1以上限定）
     const valMin = durationMin;
@@ -6851,7 +7271,7 @@ function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
           const valDay = parseFloat((durationMin / 1440).toFixed(3));
           newRow[col.id] = valDay >= 1.0 ? `${valDay}日間` : '';
         } else if (!colName.includes('開始') && !colName.includes('終了') && !colName.includes('実行') && !colName.includes('作業') && !colName.includes('集中時間') && !colName.includes('経過') && !colName.includes('実績') && col.id !== 'col-title') {
-          newRow[col.id] = taskName || '集中セッション';
+          newRow[col.id] = taskName || '作業セッション';
         } else {
           newRow[col.id] = '';
         }
@@ -6874,6 +7294,12 @@ function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
         newRow[col.id] = completeOpt ? completeOpt.id : '完了';
       } else if (col.type === 'checkbox') {
         newRow[col.id] = true;
+      } else if (col.type === 'select') {
+        if (!col.options) col.options = [];
+        if (!col.options.includes(taskName || '作業セッション')) {
+          col.options.push(taskName || '作業セッション');
+        }
+        newRow[col.id] = taskName || '作業セッション';
       } else {
         newRow[col.id] = '';
       }
@@ -7128,16 +7554,6 @@ function formatDatePropertyValueForDisplay(val, col = null) {
   if (mode === 'duration-days') {
     const days = parseFloat((diffMs / (1000 * 60 * 60 * 24)).toFixed(1));
     return days > 0 ? `${days}日間` : '1日以内';
-  }
-  
-  if (mode === 'duration-hours') {
-    const hours = parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1));
-    return `${hours}時間`;
-  }
-  
-  if (mode === 'duration-minutes') {
-    const minutes = parseFloat((diffMs / (1000 * 60)).toFixed(1));
-    return `${minutes}分`;
   }
   
   if (mode === 'remaining-days') {

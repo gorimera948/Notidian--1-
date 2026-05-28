@@ -2767,6 +2767,208 @@ svg#cumulative-chart {
   border-left: 3px solid #f87171;
 }
 
+/* Timer Volume Slider styling */
+.timer-volume-control input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  outline: none;
+  transition: background 0.15s ease;
+}
+.timer-volume-control input[type="range"]:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.timer-volume-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-primary, #8b5cf6);
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(139, 92, 246, 0.4);
+  transition: transform 0.1s ease, background-color 0.1s ease;
+}
+.timer-volume-control input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.3);
+  background: #a78bfa;
+}
+
+/* CSV Import & Export Toolbar Buttons premium styling */
+.btn-db-csv-export:hover {
+  color: #34d399 !important;
+  border-color: rgba(52, 211, 153, 0.4) !important;
+  background: rgba(52, 211, 153, 0.08) !important;
+}
+.btn-db-csv-import:hover {
+  color: #60a5fa !important;
+  border-color: rgba(96, 165, 250, 0.4) !important;
+  background: rgba(96, 165, 250, 0.08) !important;
+}
+
+/* ==========================================================================
+   Active Note Favorite Toggle & Sidebar Star Icon Premium Styling
+   ========================================================================== */
+
+/* Active Note Breadcrumb Star Button */
+.btn-favorite-toggle {
+  position: absolute;
+  top: 42px;
+  right: 40px;
+  z-index: 10;
+  background: none;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  color: #FCF16E; /* 線が色づいた状態がデフォルト */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 18px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-favorite-toggle:hover {
+  color: #FCF16E;
+  background: rgba(252, 241, 110, 0.08); /* ポップの動きを削除 */
+}
+.btn-favorite-toggle.active {
+  color: #FCF16E !important;
+  text-shadow: 0 0 8px rgba(252, 241, 110, 0.5); /* ポップの動きを削除 */
+}
+
+/* Sidebar Notes List Star Icons */
+.note-item {
+  position: relative;
+  transition: padding-left 0.15s ease, background-color 0.15s ease;
+}
+.btn-fav-star {
+  background: none;
+  border: none;
+  color: var(--text-muted, #6b7280);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 11px;
+  opacity: 0;
+  margin-left: auto; /* 右端に配置 */
+  margin-right: 4px;
+  transition: all 0.15s ease;
+}
+.note-item:hover .btn-fav-star {
+  opacity: 0.7;
+}
+.btn-fav-star:hover {
+  color: #ffb800 !important;
+  transform: scale(1.2);
+  opacity: 1 !important;
+}
+.btn-fav-star.active {
+  opacity: 1 !important;
+  color: #ffb800 !important;
+}
+
+/* Starred Folder / Favorites Accordion Styling */
+.favorite-section-header {
+  color: #fff9c4 !important; /* より極めて薄く上品なゴールド */
+  font-weight: 700 !important;
+}
+.favorite-section-header i.folder-icon {
+  color: #fff9c4 !important;
+}
+
+/* Sidebar Drag & Drop Placement Indicators */
+.drag-insert-top {
+  border-top: 2px solid var(--accent-primary, #8b5cf6) !important;
+  background-color: rgba(139, 92, 246, 0.05) !important;
+}
+.drag-insert-bottom {
+  border-bottom: 2px solid var(--accent-primary, #8b5cf6) !important;
+  background-color: rgba(139, 92, 246, 0.05) !important;
+}
+.drag-insert-inside {
+  background-color: rgba(139, 92, 246, 0.12) !important;
+  outline: 1px dashed var(--accent-primary, #8b5cf6) !important;
+}
+
+/* Daily folder popover styling */
+.daily-folder-popover-section {
+  padding: 8px 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+.daily-folder-popover-select {
+  width: 100%;
+  padding: 6px;
+  background-color: var(--bg-secondary, #1f2937);
+  color: var(--text-primary, #f3f4f6);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 4px;
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+}
+.daily-folder-popover-select option {
+  background-color: #1a1e2e;
+  color: #fff;
+}
+
+/* 📊 チャート複数選択ポップオーバー (Galactic Dark UI) */
+.db-chart-tag-popover {
+  background: rgba(13, 17, 28, 0.95) !important;
+  backdrop-filter: blur(12px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(160%) !important;
+  border: 1px solid rgba(139, 92, 246, 0.25) !important;
+  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.7), 0 0 15px rgba(139, 92, 246, 0.15) !important;
+  border-radius: 10px !important;
+  overflow: hidden;
+  animation: dbPopoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dbPopoverFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.db-chart-tag-popover-header {
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+
+.db-tag-quick-link {
+  transition: opacity 0.2s ease, transform 0.1s ease;
+  cursor: pointer;
+}
+
+.db-tag-quick-link:hover {
+  opacity: 0.85;
+  transform: translateY(-0.5px);
+}
+
+.db-tag-quick-link:active {
+  transform: translateY(0);
+}
+
+.db-chart-tag-item {
+  user-select: none;
+}
+
+.db-chart-tag-item:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.db-tag-check {
+  accent-color: var(--accent-primary) !important;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
 
 
 
