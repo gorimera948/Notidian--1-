@@ -1421,12 +1421,14 @@ function setupDragDropListeners() {
     const handle = wrapper.querySelector('.drag-handle');
     if (!handle) return;
 
-    // Only allow drag-start if clicking handle
-    handle.addEventListener('mousedown', () => {
+    // Only allow drag-start if hovering handle
+    handle.addEventListener('mouseenter', () => {
       wrapper.setAttribute('draggable', 'true');
     });
-    handle.addEventListener('mouseup', () => {
-      wrapper.removeAttribute('draggable');
+    handle.addEventListener('mouseleave', () => {
+      if (!wrapper.classList.contains('dragging')) {
+        wrapper.removeAttribute('draggable');
+      }
     });
 
     wrapper.addEventListener('dragstart', (e) => {
@@ -1504,41 +1506,63 @@ function setupDragDropListeners() {
         }
       }
 
-      // Column triggers: Left 10% or Right 10% (ドラッグ中のブロックがカラムコンテナでない場合のみ)
-      if (isLeftRightAllowed && xRatio < 0.1) {
-        state.dropLocation = 'left';
-        showDropIndicator('left', rect);
-      } else if (isLeftRightAllowed && xRatio > 0.9) {
-        state.dropLocation = 'right';
-        showDropIndicator('right', rect);
-      } else {
-        // Vertical triggers
-        // もしターゲットがトグルで、かつ isLeftRightAllowed が false（内側を意図）の場合
-        if (found && found.block.type === 'toggle' && !isLeftRightAllowed && contentRect) {
-          if (yRatio < 0.3) {
-            state.dropLocation = 'top';
-            showDropIndicator('top', rect);
-          } else {
-            state.dropLocation = 'inside';
+      // 1. カラム作成（左右非対称の優先判定）
+      let resolvedLocation = null;
 
-            // インジケータはトグルのすぐ下、インデントされた位置に表示してネストされることを明示
-            const indicator = document.getElementById('drop-indicator-bottom');
-            if (indicator) {
-              indicator.style.left = `${contentRect.left}px`;
-              indicator.style.top = `${contentRect.bottom - 2}px`;
-              indicator.style.width = `${contentRect.width}px`;
-              indicator.style.display = 'block';
-            }
+      if (isLeftRightAllowed) {
+        // 右端 80px 以内なら最優先で右カラム作成（極めて広く取り確実に起動！）
+        if (rect.width - x < 80) {
+          resolvedLocation = 'right';
+        }
+        // 左端 30px 以内なら最優先で左カラム作成（ドラッグハンドル12pxを避けつつ十分狙える広さに設定）
+        // ただし、上下の隙間（6px以内）を狙って行並べ替えをしている時は誤判定を防ぐため除外
+        else if (x < 30 && y >= 6 && rect.height - y >= 6) {
+          resolvedLocation = 'left';
+        }
+      }
+
+      // 2. 縦方向（行間）の判定（ガタつきをゼロにする）
+      if (!resolvedLocation) {
+        // トグルブロック内のネスト（inside）処理
+        const isToggleInside = found && found.block.type === 'toggle' && !isLeftRightAllowed && contentRect;
+
+        if (isToggleInside) {
+          if (y < rect.height * 0.3) {
+            resolvedLocation = 'top';
+          } else {
+            resolvedLocation = 'inside';
           }
         } else {
-          if (yRatio < 0.5) {
-            state.dropLocation = 'top';
-            showDropIndicator('top', rect);
+          // 【超重要】一番上のブロックの上部 30% のときだけ top、それ以外は常に bottom に統一してガタつきを完全解消
+          const isFirstBlock = found && found.index === 0 && (!found.parent || found.parent.type !== 'column');
+          if (isFirstBlock && y < rect.height * 0.3) {
+            resolvedLocation = 'top';
           } else {
-            state.dropLocation = 'bottom';
-            showDropIndicator('bottom', rect);
+            resolvedLocation = 'bottom';
           }
         }
+      }
+
+      // 3. 確定した位置に基づいてインジケータを表示
+      state.dropLocation = resolvedLocation;
+
+      if (resolvedLocation === 'left') {
+        showDropIndicator('left', rect);
+      } else if (resolvedLocation === 'right') {
+        showDropIndicator('right', rect);
+      } else if (resolvedLocation === 'top') {
+        showDropIndicator('top', rect);
+      } else if (resolvedLocation === 'inside') {
+        // インジケータはトグルのすぐ下、インデントされた位置に表示してネストされることを明示
+        const indicator = document.getElementById('drop-indicator-bottom');
+        if (indicator) {
+          indicator.style.left = `${contentRect.left}px`;
+          indicator.style.top = `${contentRect.bottom - 2}px`;
+          indicator.style.width = `${contentRect.width}px`;
+          indicator.style.display = 'block';
+        }
+      } else {
+        showDropIndicator('bottom', rect);
       }
     });
 
@@ -3395,7 +3419,7 @@ function setupDbColumnResizer(resizerEl, col, th, table, block, visibleRows) {
     const nextCol = isLeftCol ? block.properties.columns[0] : block.properties.columns[colIndex];
 
     const startWidth = isLeftCol ? (block.properties.leftColWidth || 34) : (col.width || th.getBoundingClientRect().width);
-    const startNextWidth = nextTh ? (nextCol ? nextCol.width : nextTh.getBoundingClientRect().width) : null;
+    const startNextWidth = (nextTh && nextCol) ? nextCol.width : null;
 
     function onMouseMove(moveEvent) {
       const deltaX = moveEvent.clientX - startX;

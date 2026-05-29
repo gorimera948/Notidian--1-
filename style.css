@@ -765,7 +765,7 @@ select:focus {
   position: relative;
   display: flex;
   align-items: flex-start;
-  padding: 3px 0 3px 44px;
+  padding: 3px 0 3px 68px;
   /* Separated drag icons further from text */
   border-radius: 4px;
   transition: background-color 0.15s ease;
@@ -774,7 +774,7 @@ select:focus {
 /* Block drag handle & actions */
 .block-controls {
   position: absolute;
-  left: 8px;
+  left: 12px;
   /* Shifted icons left and gave them dedicated gutter spacing */
   top: 50%;
   transform: translateY(-50%);
