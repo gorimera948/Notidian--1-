@@ -390,6 +390,22 @@ function saveLogsToStorage() {
 // 2. WIKILINKS PARSER & AUTOCOMPLETE
 // ==========================================
 
+// HTMLからWikiText（生ブラケット）への逆シリアライザ
+function serializeHtmlToWikiText(element) {
+  if (!element) return '';
+  const clone = element.cloneNode(true);
+  const links = clone.querySelectorAll('.wiki-link');
+  links.forEach(link => {
+    const target = link.getAttribute('data-target') || link.textContent;
+    const isJp = link.getAttribute('data-bracket') === 'jp';
+    const open = isJp ? '「「' : '[[';
+    const close = isJp ? '」」' : ']]';
+    const textNode = document.createTextNode(`${open}${target}${close}`);
+    link.parentNode.replaceChild(textNode, link);
+  });
+  return clone.textContent;
+}
+
 // Regex for wiki links
 const WIKI_LINK_REGEX = /\[\[(.*?)\]\]/g;
 const JP_LINK_REGEX = /「「(.*?)」」/g;
@@ -407,8 +423,12 @@ function parseWikiLinks(htmlContent) {
     const exists = state.notes.some(note => note.title.toLowerCase() === trimmedTitle.toLowerCase());
     const className = exists ? 'wiki-link' : 'wiki-link wiki-link-new';
     const tooltip = exists ? 'ノートを開く' : 'ノートを自動作成して開く';
+    
+    // トリガーされたカッコの種類を推測して記録
+    const isJp = match.startsWith('「「');
+    const bracketAttr = isJp ? 'data-bracket="jp"' : 'data-bracket="en"';
 
-    return `<span class="${className}" data-target="${escapeHTML(trimmedTitle)}" title="${tooltip}" contenteditable="false">${escapeHTML(noteTitle)}</span>`;
+    return `<span class="${className}" data-target="${escapeHTML(trimmedTitle)}" ${bracketAttr} title="${tooltip}" contenteditable="false">${escapeHTML(noteTitle)}</span>`;
   };
 
   parsed = parsed.replace(WIKI_LINK_REGEX, replaceLink);
@@ -477,6 +497,40 @@ function renderEditor() {
         saveNotesToStorage();
         renderEditor();
         renderNoteList();
+      };
+    }
+
+    // ノート削除ボタンの動的生成と更新
+    let deleteBtn = titleWrapper.querySelector('.btn-note-delete');
+    if (!deleteBtn) {
+      deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn-note-delete';
+      deleteBtn.style = 'position: absolute; top: 42px; right: 74px; z-index: 10; background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: 6px; font-size: 18px; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s ease;';
+      deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+      deleteBtn.title = '現在のノートを削除';
+      titleWrapper.appendChild(deleteBtn);
+    }
+    
+    deleteBtn.onmouseenter = () => {
+      deleteBtn.style.color = '#ef4444';
+      deleteBtn.style.background = 'rgba(239, 68, 68, 0.1)';
+    };
+    deleteBtn.onmouseleave = () => {
+      deleteBtn.style.color = 'var(--text-muted)';
+      deleteBtn.style.background = 'transparent';
+    };
+
+    const newDeleteBtn = deleteBtn.cloneNode ? deleteBtn.cloneNode(true) : deleteBtn;
+    if (newDeleteBtn !== deleteBtn) {
+      newDeleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteNote(note.id, e);
+      });
+      titleWrapper.replaceChild(newDeleteBtn, deleteBtn);
+    } else {
+      deleteBtn.onclick = (e) => {
+        e.stopPropagation();
+        deleteNote(note.id, e);
       };
     }
   }
@@ -603,7 +657,8 @@ function createBlockDOM(block, parentBlock = null) {
 
   blockWrapper.addEventListener('click', (e) => {
     const isEditTarget = e.target.closest('.block-content, input, button, select');
-    if (isEditTarget && !e.shiftKey) {
+    const isCheckbox = e.target.closest('.block-select-check');
+    if (isEditTarget && !isCheckbox && !e.shiftKey) {
       // テキスト通常クリックによる編集開始時、もし一括選択状態があればリセットする
       if ((state.selectedBlockIds && state.selectedBlockIds.length > 0) || (tableSelection.selectedRows && tableSelection.selectedRows.length > 0)) {
         clearBlockSelection();
@@ -987,31 +1042,24 @@ function createEditableContent(block) {
   if (block.type === 'h2') placeholder = '見出し 2';
   contentDiv.setAttribute('placeholder', placeholder);
 
-  // Set rendered text (parse links if not active/focused)
-  if (state.activeFocusedBlockId === block.id) {
-    contentDiv.textContent = block.content;
-  } else {
-    contentDiv.innerHTML = parseWikiLinks(escapeHTML(block.content));
-  }
+  // Set rendered text (always render parseWikiLinks)
+  contentDiv.innerHTML = parseWikiLinks(escapeHTML(block.content));
 
   // Listeners
   contentDiv.addEventListener('focus', () => {
     state.activeFocusedBlockId = block.id;
     state.lastActiveEditTarget = contentDiv;
-    // When focused, show raw text with wiki links raw brackets so it is editable
-    contentDiv.textContent = block.content;
-    // Position cursor at end (or keep current if focused naturally)
   });
 
   contentDiv.addEventListener('blur', () => {
-    // Save content to state
-    const textVal = contentDiv.textContent;
+    // Save content to state (using HTML-to-WikiText serializer)
+    const textVal = serializeHtmlToWikiText(contentDiv);
     const oldContent = block.content;
     block.content = textVal;
 
     state.activeFocusedBlockId = null;
 
-    // Reparse WikiLinks and render HTML
+    // Re-render to ensure styling and link-new tags are updated correctly
     contentDiv.innerHTML = parseWikiLinks(escapeHTML(block.content));
 
     if (oldContent !== textVal) {
@@ -1021,7 +1069,7 @@ function createEditableContent(block) {
   });
 
   contentDiv.addEventListener('input', (e) => {
-    block.content = contentDiv.textContent;
+    block.content = serializeHtmlToWikiText(contentDiv);
 
     // Check slash command trigger "/"
     handleSlashCommandTrigger(contentDiv, e);
@@ -1126,6 +1174,90 @@ function handleEditorKeydown(e, block, contentDiv) {
 
   // Regular keydowns
   if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.isComposing) return; // IME変換確定時はWikiLink確定処理を実行しない
+
+    // 補完メニューが開いていなくても、「「キーワード の直後でEnterが押された場合に自動置換する処理
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const node = range.startContainer;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent;
+        const offset = range.startOffset;
+        const beforeText = text.substring(0, offset);
+
+        const match = beforeText.match(/(?:「「|\[\[)([^「「\[\[\]\]」」]+)$/);
+        if (match) {
+          e.preventDefault();
+          const keyword = match[1];
+          const trimmedKeyword = keyword.trim();
+          if (!trimmedKeyword) return;
+
+          // トリガーされたカッコの種類を特定
+          const triggerType = beforeText.substring(offset - keyword.length - 2, offset - keyword.length);
+          const isJp = triggerType === '「「';
+          const closeBracket = isJp ? '」」' : ']]';
+
+          // 🌟 存在しないノートの場合、裏で自動的に新規ノートを作成して「リンクが機能」するように実在化！
+          let existingNote = state.notes.find(n => n.title.toLowerCase() === trimmedKeyword.toLowerCase());
+          if (!existingNote) {
+            const activeNote = getActiveNote();
+            const parentFolderId = activeNote ? activeNote.folderId : null;
+            existingNote = {
+              id: 'note-' + generateId(),
+              title: trimmedKeyword,
+              folderId: parentFolderId,
+              updatedAt: Date.now(),
+              blocks: [
+                { id: generateId(), type: 'p', content: '' }
+              ]
+            };
+            state.notes.push(existingNote);
+            saveNotesToStorage();
+            renderNoteList();
+          }
+
+          // 🌟 その場で即座に青い WikiLink の HTML/DOM 要素を生成
+          const span = document.createElement('span');
+          span.className = existingNote ? 'wiki-link' : 'wiki-link wiki-link-new';
+          span.setAttribute('data-target', trimmedKeyword);
+          span.setAttribute('data-bracket', isJp ? 'jp' : 'en');
+          span.setAttribute('title', 'ノートを開く');
+          span.setAttribute('contenteditable', 'false');
+          span.textContent = keyword;
+
+          // カーソルの直後にすでに閉じカッコが存在するかどうかを確認（存在する場合は削除）
+          const afterText = text.substring(offset);
+          if (afterText.startsWith(closeBracket)) {
+            const caretRange = selection.getRangeAt(0);
+            caretRange.setStart(node, offset);
+            caretRange.setEnd(node, offset + 2);
+            caretRange.deleteContents();
+          }
+
+          // 入力中の 「「キーワード の部分を削除して、代わりに作成した span を挿入！
+          const caretRange = selection.getRangeAt(0);
+          caretRange.setStart(node, offset - keyword.length - 2);
+          caretRange.setEnd(node, offset);
+          caretRange.deleteContents();
+          
+          caretRange.insertNode(span);
+
+          // カーソルを挿入した span の直後にセット！
+          selection.removeAllRanges();
+          const newRange = document.createRange();
+          newRange.setStartAfter(span);
+          newRange.collapse(true);
+          selection.addRange(newRange);
+
+          // エディタのブロック内容を更新 (HTML-to-WikiTextシリアライザを使う)
+          block.content = serializeHtmlToWikiText(contentDiv);
+          saveNotesToStorage();
+          return;
+        }
+      }
+    }
+
     e.preventDefault();
     const note = getActiveNote();
     const found = findBlockAndParent(note.blocks, block.id);
@@ -2116,7 +2248,10 @@ function selectLinkMenuItem() {
     noteTitle = searchQuery;
   }
 
-  const completedLink = `[[${noteTitle}]]`;
+  const isJp = state.linkTriggerPos && state.linkTriggerPos.type === '「「';
+  const openBracket = isJp ? '「「' : '[[';
+  const closeBracket = isJp ? '」」' : ']]';
+  const completedLink = `${openBracket}${noteTitle}${closeBracket}`;
 
   // Selection と Range を使用して、現在の入力箇所（トリガー開始位置からキャレットまで）を正確に置換する
   const sel = window.getSelection();
@@ -2253,6 +2388,8 @@ let isDragSelecting = false;
 let dragStartX = 0;
 let dragStartY = 0;
 let selectionBox = null;
+let startRange = null; // 🆕 文字ドラッグ選択の開始位置
+let lastSelectionRange = null; // 🆕 ドラッグ選択の最新状態を一時退避
 
 let potentialDragStart = false;
 
@@ -2261,101 +2398,91 @@ function setupDragSelection() {
   if (!editor) return;
 
   editor.addEventListener('mousedown', (e) => {
-    // ボタン、セレクト、チェックボックス、ドラッグハンドル、一括操作バーなどをクリックした場合は通常の操作
-    if (e.target.closest('button') || e.target.closest('select') || e.target.closest('input[type="checkbox"]') || e.target.closest('.drag-handle') || e.target.closest('.db-bulk-action-bar')) {
-      return;
-    }
+    // 編集領域（.block-content）以外の要素、またはボタンやチェックボックス等のクリックは除外
+    if (!e.target.closest('.block-content')) return;
 
     potentialDragStart = true;
     dragStartX = e.pageX;
     dragStartY = e.pageY;
+
+    const x = e.clientX;
+    const y = e.clientY;
+    if (document.caretRangeFromPoint) {
+      startRange = document.caretRangeFromPoint(x, y);
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(x, y);
+      if (pos) {
+        startRange = document.createRange();
+        startRange.setStart(pos.offsetNode, pos.offset);
+        startRange.collapse(true);
+      }
+    }
   });
 
   document.addEventListener('mousemove', (e) => {
     if (potentialDragStart && !isDragSelecting) {
       const distance = Math.sqrt(Math.pow(e.pageX - dragStartX, 2) + Math.pow(e.pageY - dragStartY, 2));
-      
-      // 6px 以上ドラッグ（移動）させたらドラッグ選択モードに切り替える
-      if (distance > 6) {
+      // 4px以上の移動でドラッグ選択モードに切り替え
+      if (distance > 4) {
         isDragSelecting = true;
-        
-        // テキスト選択やデフォルト挙動をキャンセル
-        e.preventDefault();
-        window.getSelection().removeAllRanges();
-        document.activeElement.blur(); // フォーカスを解除
-        
-        // 既存の選択状態をクリア
-        clearBlockSelection();
       }
     }
 
-    if (!isDragSelecting) return;
+    if (!isDragSelecting || !startRange) return;
 
-    // テキストハイライトの発生を徹底的に抑止
-    e.preventDefault();
-
-    const currentX = e.pageX;
-    const currentY = e.pageY;
-
-    // 仮想のドラッグ選択領域（ドキュメント絶対座標系）
-    const boxLeft = Math.min(dragStartX, currentX);
-    const boxTop = Math.min(dragStartY, currentY);
-    const boxWidth = Math.abs(dragStartX - currentX);
-    const boxHeight = Math.abs(dragStartY - currentY);
-    const boxRight = boxLeft + boxWidth;
-    const boxBottom = boxTop + boxHeight;
-
-    const blocks = document.querySelectorAll('.block-wrapper[data-id]');
-    const selectedIds = [];
-
-    blocks.forEach(blockEl => {
-      const blockId = blockEl.getAttribute('data-id');
-      if (!blockId) return;
-
-      const blockRect = blockEl.getBoundingClientRect();
-      const scrollY = window.scrollY;
-      const scrollX = window.scrollX;
-      
-      // blockRectのドキュメント座標への変換
-      const blockLeft = blockRect.left + scrollX;
-      const blockRight = blockRect.right + scrollX;
-      const blockTop = blockRect.top + scrollY;
-      const blockBottom = blockRect.bottom + scrollY;
-
-      const isOverlapping = !(
-        blockRight < boxLeft ||
-        blockLeft > boxRight ||
-        blockBottom < boxTop ||
-        blockTop > boxBottom
-      );
-
-      if (isOverlapping) {
-        selectedIds.push(blockId);
-        blockEl.classList.add('selected'); // style.cssの選択スタイルを適用
-        const check = blockEl.querySelector('.block-select-check');
-        if (check) check.checked = true;
-      } else {
-        blockEl.classList.remove('selected');
-        const check = blockEl.querySelector('.block-select-check');
-        if (check) check.checked = false;
+    let currentRange = null;
+    const x = e.clientX;
+    const y = e.clientY;
+    if (document.caretRangeFromPoint) {
+      currentRange = document.caretRangeFromPoint(x, y);
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(x, y);
+      if (pos) {
+        currentRange = document.createRange();
+        currentRange.setStart(pos.offsetNode, pos.offset);
+        currentRange.collapse(true);
       }
-    });
+    }
 
-    state.selectedBlockIds = selectedIds;
+    if (currentRange) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+
+      const newRange = document.createRange();
+
+      // 開始点と終了点の前後関係を正しく比較して範囲を決定
+      const compare = startRange.compareBoundaryPoints(Range.START_TO_START, currentRange);
+      if (compare <= 0) {
+        newRange.setStart(startRange.startContainer, startRange.startOffset);
+        newRange.setEnd(currentRange.startContainer, currentRange.startOffset);
+      } else {
+        newRange.setStart(currentRange.startContainer, currentRange.startOffset);
+        newRange.setEnd(startRange.startContainer, startRange.startOffset);
+      }
+
+      sel.addRange(newRange);
+      lastSelectionRange = newRange; // 🆕 最新の選択範囲を退避
+    }
   });
 
-  document.addEventListener('mouseup', () => {
+  document.addEventListener('mouseup', (e) => {
     potentialDragStart = false;
-
     if (isDragSelecting) {
       isDragSelecting = false;
-      updateBlockBulkActionBar();
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // 🌟 ブラウザの標準mouseup挙動によるハイライト強制クリアを防ぐため、非同期で選択範囲を強制的に書き戻す！
+      if (lastSelectionRange) {
+        const savedRange = lastSelectionRange;
+        setTimeout(() => {
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(savedRange);
+        }, 15);
+      }
     }
-
-    if (isRowDragSelecting) {
-      isRowDragSelecting = false;
-      renderEditor();
-    }
+    startRange = null;
   });
 }
 
@@ -5263,6 +5390,85 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
           }
 
           if (evt.key === 'Enter') {
+            if (evt.isComposing) return;
+            
+            // 補完メニューが開いていなくても、「「キーワード の直後でEnterが押された場合に自動置換する処理
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+              const range = selection.getRangeAt(0);
+              const node = range.startContainer;
+              if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent;
+                const offset = range.startOffset;
+                const beforeText = text.substring(0, offset);
+
+                const match = beforeText.match(/(?:「「|\[\[)([^「「\[\[\]\]」」]+)$/);
+                if (match) {
+                  evt.preventDefault();
+                  const keyword = match[1];
+                  
+                  // トリガーされたカッコの種類を特定
+                  const triggerType = beforeText.substring(offset - keyword.length - 2, offset - keyword.length);
+                  const isJp = triggerType === '「「';
+                  const openBracket = isJp ? '「「' : '[[';
+                  const closeBracket = isJp ? '」」' : ']]';
+
+                  // コピーされたカッコの重複防止
+                  const afterText = text.substring(offset);
+                  const hasCloseBracket = afterText.startsWith(closeBracket);
+                  const actualCloseBracket = hasCloseBracket ? '' : closeBracket;
+
+                  const newText = text.substring(0, offset - keyword.length - 2) + `${openBracket}${keyword}${actualCloseBracket}` + text.substring(offset);
+                  node.textContent = newText;
+
+                  const newOffset = offset - keyword.length - 2 + keyword.length + 4;
+                  const newRange = document.createRange();
+                  newRange.setStart(node, newOffset);
+                  newRange.setEnd(node, newOffset);
+                  selection.removeAllRanges();
+                  selection.addRange(newRange);
+
+                  // 🌟 存在しないノートの場合、裏で自動的に新規ノートを作成！
+                  const trimmedKeyword = keyword.trim();
+                  if (trimmedKeyword) {
+                    let existingNote = state.notes.find(n => n.title.toLowerCase() === trimmedKeyword.toLowerCase());
+                    if (!existingNote) {
+                      const activeNote = getActiveNote();
+                      const parentFolderId = activeNote ? activeNote.folderId : null;
+                      existingNote = {
+                        id: 'note-' + generateId(),
+                        title: trimmedKeyword,
+                        folderId: parentFolderId,
+                        updatedAt: Date.now(),
+                        blocks: [
+                          { id: generateId(), type: 'p', content: '' }
+                        ]
+                      };
+                      state.notes.push(existingNote);
+                      saveNotesToStorage();
+                      renderNoteList();
+                    }
+                  }
+
+                  row[col.id] = cellDiv.textContent;
+                  saveNotesToStorage();
+
+                  // 🌟 一時的にフォーカスアウト(blur)して WikiLink レンダリング（青色リンク）をリアルタイムで即時適用し、即座にフォーカスを戻す
+                  cellDiv.blur();
+                  setTimeout(() => {
+                    cellDiv.focus();
+                    const restoreRange = document.createRange();
+                    restoreRange.setStart(node, newOffset);
+                    restoreRange.setEnd(node, newOffset);
+                    const sel = window.getSelection();
+                    sel.removeAllRanges();
+                    sel.addRange(restoreRange);
+                  }, 10);
+                  return;
+                }
+              }
+            }
+
             evt.preventDefault();
             cellDiv.blur();
           }

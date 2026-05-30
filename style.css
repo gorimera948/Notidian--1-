@@ -3545,9 +3545,9 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
    PREMIUM BLOCK MULTI-SELECTION STYLING
    ========================================= */
 .block-wrapper.selected {
-  background-color: rgba(236, 72, 153, 0.06) !important; /* パステルピンク背景 */
-  border-left: 3px solid var(--accent-secondary, #ec4899) !important;
-  box-shadow: 0 0 10px rgba(236, 72, 153, 0.1) !important;
+  background-color: rgba(59, 130, 246, 0.09) !important; /* 美しい半透明ブルー（ハイライト青） */
+  border-left: 3px solid #3b82f6 !important; /* 鮮やかなブルー */
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.2) !important;
   transition: background-color 0.20s ease, border-left 0.20s ease !important;
 }
 
