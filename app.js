@@ -31,7 +31,10 @@ const state = {
   draggedSidebarType: null, // 'note' | 'folder'
   dropTargetSidebarId: null, // ID of folder target being hovered
   collapsedFavorites: false,
-  selectedBlockIds: []
+  selectedBlockIds: [],
+  copiedRowData: null,
+  copiedBlocksData: null,
+  lastActiveEditTarget: null
 };
 
 // ==========================================
@@ -79,14 +82,6 @@ function undo() {
 
   // ローカルストレージに保存し、エディタを再描画
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
-  const saveStatus = document.getElementById('save-status');
-  if (saveStatus) {
-    saveStatus.innerHTML = '';
-    saveStatus.style.opacity = '1';
-    setTimeout(() => {
-      saveStatus.style.opacity = '0.7';
-    }, 1500);
-  }
   renderNoteList();
   renderEditor();
 
@@ -106,14 +101,6 @@ function redo() {
 
   // ローカルストレージに保存し、エディタを再描画
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
-  const saveStatus = document.getElementById('save-status');
-  if (saveStatus) {
-    saveStatus.innerHTML = '';
-    saveStatus.style.opacity = '1';
-    setTimeout(() => {
-      saveStatus.style.opacity = '0.7';
-    }, 1500);
-  }
   renderNoteList();
   renderEditor();
 
@@ -204,6 +191,7 @@ const sampleNotes = [
 
 function initStorage() {
   state.collapsedFavorites = localStorage.getItem('notidian_collapsed_favorites') === 'true';
+  state.collapsedEmptyNotes = localStorage.getItem('notidian_collapsed_empty_notes') === 'true';
 
   // Load Focus Logs
   try {
@@ -327,6 +315,8 @@ function initStorage() {
     if (note.templateSourceId === undefined) note.templateSourceId = null;
     if (note.isDailyDefault === undefined) note.isDailyDefault = false;
     if (note.isFavorite === undefined) note.isFavorite = false;
+    if (note.tags === undefined) note.tags = [];
+
     if (note.sortIndex === undefined) {
       note.sortIndex = note.updatedAt || (Date.now() - idx * 1000);
     }
@@ -370,6 +360,9 @@ function initStorage() {
     }
   });
 
+  // 【統合データ完全性】古いWikiリンクのプレーンテキスト化 ＆ 空タグの自動一括クリーンアップ
+  cleanDeadWikiLinksAndTags();
+
   // 初期の履歴状態を保存
   try {
     historyState.undoStack = [JSON.stringify(state.notes)];
@@ -380,19 +373,12 @@ function initStorage() {
 }
 
 function saveNotesToStorage() {
+  cleanDeadWikiLinksAndTags();
   pushHistory();
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
   localStorage.setItem('notidian_folders', JSON.stringify(state.folders));
   localStorage.setItem('notidian_collapsed_folders', JSON.stringify(state.collapsedFolders));
   localStorage.setItem('notidian_daily_folder_id', state.dailyFolderId || '');
-  const saveStatus = document.getElementById('save-status');
-  if (saveStatus) {
-    saveStatus.innerHTML = '';
-    saveStatus.style.opacity = '1';
-    setTimeout(() => {
-      saveStatus.style.opacity = '0.7';
-    }, 1500);
-  }
 }
 
 function saveLogsToStorage() {
@@ -432,7 +418,9 @@ function parseWikiLinks(htmlContent) {
 }
 
 function escapeHTML(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  if (str === null || str === undefined) return '';
+  const s = String(str);
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function getActiveNote() {
@@ -495,6 +483,9 @@ function renderEditor() {
 
   // Clear canvas
   blockCanvas.innerHTML = '';
+
+  // タグ表示のレンダリング
+  renderNoteTags();
 
   // Render top-level blocks
   if (note.blocks.length === 0) {
@@ -609,6 +600,24 @@ function createBlockDOM(block, parentBlock = null) {
   const blockWrapper = document.createElement('div');
   blockWrapper.className = `block-wrapper block-${block.type}-wrapper`;
   blockWrapper.setAttribute('data-id', block.id);
+
+  blockWrapper.addEventListener('click', (e) => {
+    const isEditTarget = e.target.closest('.block-content, input, button, select');
+    if (isEditTarget && !e.shiftKey) {
+      // テキスト通常クリックによる編集開始時、もし一括選択状態があればリセットする
+      if ((state.selectedBlockIds && state.selectedBlockIds.length > 0) || (tableSelection.selectedRows && tableSelection.selectedRows.length > 0)) {
+        clearBlockSelection();
+        clearTableSelection();
+      }
+      return;
+    }
+    
+    if (e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleBlockClick(e, block.id);
+    }
+  });
 
   // If container block (columns, column, toggle), we render their layout
   if (block.type === 'columns') {
@@ -881,6 +890,15 @@ function createBlockControls(blockId, blockType = null) {
   check.style = 'cursor:pointer; margin: 0 4px 0 0; width:11px; height:11px; display:inline-block; accent-color: var(--accent-primary);';
   check.checked = state.selectedBlockIds && state.selectedBlockIds.includes(blockId);
 
+  check.addEventListener('click', (e) => {
+    if (e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      check.checked = !check.checked;
+      handleBlockClick(e, blockId);
+    }
+  });
+
   check.addEventListener('change', (e) => {
     e.stopPropagation();
     const checked = e.target.checked;
@@ -899,6 +917,9 @@ function createBlockControls(blockId, blockType = null) {
     }
     
     updateBlockBulkActionBar();
+    
+    // 通常クリックして選択した時に前回の選択IDを更新する
+    lastSelectedBlockId = blockId;
   });
 
   const addBtn = document.createElement('button');
@@ -976,6 +997,7 @@ function createEditableContent(block) {
   // Listeners
   contentDiv.addEventListener('focus', () => {
     state.activeFocusedBlockId = block.id;
+    state.lastActiveEditTarget = contentDiv;
     // When focused, show raw text with wiki links raw brackets so it is editable
     contentDiv.textContent = block.content;
     // Position cursor at end (or keep current if focused naturally)
@@ -1090,6 +1112,7 @@ function handleEditorKeydown(e, block, contentDiv) {
       return;
     }
     if (e.key === 'Enter') {
+      if (e.isComposing) return; // IME変換確定時はWikiLink確定処理を実行しない
       e.preventDefault();
       selectLinkMenuItem();
       return;
@@ -1854,17 +1877,19 @@ function selectSlashMenuItem() {
   const note = getActiveNote();
   if (!note) return;
 
-  const activeContentDiv = document.querySelector(`.block-content[data-id="${state.activeFocusedBlockId}"]`);
+  const activeBlockId = state.activeFocusedBlockId;
+  const activeContentDiv = document.querySelector(`.block-content[data-id="${activeBlockId}"]`);
   if (!activeContentDiv) return;
 
-  const found = findBlockAndParent(note.blocks, state.activeFocusedBlockId);
+  const found = findBlockAndParent(note.blocks, activeBlockId);
   if (!found) return;
 
-  // Strip trigger from end of content
+  // IMEの未確定入力を強制的に確定反映させるため、一度フォーカスを外す（超重要）
+  activeContentDiv.blur();
+
+  // 入力中に混入したスラッシュや￥などのトリガー記号を一括で完全に削除する（IME確定ズレ対策）
   let text = activeContentDiv.textContent;
-  if (text.endsWith('/') || text.endsWith('／') || text.endsWith('\\') || text.endsWith('￥') || text.endsWith('¥')) {
-    text = text.substring(0, text.length - 1);
-  }
+  text = text.replace(/[\/／\\￥¥]/g, '');
 
   // Update block type
   found.block.type = newType;
@@ -1875,7 +1900,6 @@ function selectSlashMenuItem() {
   if (newType === 'toggle') found.block.properties = { open: true, children: [] };
   if (newType === 'callout') {
     found.block.properties = { emoji: '💡', color: 'purple' };
-    found.block.content = 'ここに重要な注記やヒントを入力します。';
   }
   if (newType === 'divider') {
     found.block.content = '';
@@ -1892,7 +1916,7 @@ function selectSlashMenuItem() {
           ]
         },
         {
-          id: 'col-tags', name: 'タグ', type: 'select', width: 140, options: [
+          id: 'col-tags', name: 'セレクトタグ', type: 'select', width: 140, options: [
             { id: 'opt-tag-dev', name: '開発', color: 'purple' },
             { id: 'opt-tag-design', name: 'デザイン', color: 'pink' },
             { id: 'opt-tag-doc', name: '資料作成', color: 'yellow' }
@@ -1979,13 +2003,24 @@ function handleWikiLinkTrigger(contentDiv, e) {
     }
 
     state.linkMenuOpen = true;
-    state.linkTriggerPos = { index: triggerIdx, type: triggerType, search: searchString };
+    state.linkTriggerPos = { 
+      index: triggerIdx, 
+      type: triggerType, 
+      search: searchString,
+      originalLength: searchString.length 
+    };
 
     // Position popup
     const rect = window.getSelection().getRangeAt(0).getBoundingClientRect();
     linkMenu.style.left = `${rect.left}px`;
     linkMenu.style.top = `${rect.bottom + window.scrollY + 6}px`;
     linkMenu.style.display = 'block';
+
+    // 検索窓にフォーカスがない場合に、エディタの入力を検索窓の値に同期
+    const linkMenuSearchInput = document.getElementById('link-menu-search-input');
+    if (linkMenuSearchInput && document.activeElement !== linkMenuSearchInput) {
+      linkMenuSearchInput.value = searchString;
+    }
 
     renderLinkMenuList(searchString);
   } else {
@@ -1996,8 +2031,8 @@ function handleWikiLinkTrigger(contentDiv, e) {
 function renderLinkMenuList(searchQuery) {
   linkMenuList.innerHTML = '';
 
-  // Filter notes
-  const filtered = state.notes.filter(n =>
+  // テンプレートを除外した、通常ノートのみを候補とする
+  const filtered = getActiveNormalNotes().filter(n =>
     n.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -2022,6 +2057,11 @@ function renderLinkMenuList(searchQuery) {
       }
       li.onmousedown = (e) => {
         e.preventDefault();
+
+        // 視覚的なアクティブ表示をクリックされた要素に即座に切り替える
+        linkMenuList.querySelectorAll('li').forEach(el => el.classList.remove('active'));
+        li.classList.add('active');
+
         state.linkMenuActiveIndex = idx;
         selectLinkMenuItem();
       };
@@ -2049,18 +2089,31 @@ function navigateLinkMenu(dir) {
 }
 
 function selectLinkMenuItem() {
-  const activeContentDiv = document.querySelector(`.block-content[data-id="${state.activeFocusedBlockId}"]`);
+  // 直前に編集（フォーカス）されていた要素を最優先で取得
+  let activeContentDiv = state.lastActiveEditTarget;
+  if (!activeContentDiv || (!activeContentDiv.classList.contains('block-content') && !activeContentDiv.classList.contains('db-cell-edit'))) {
+    activeContentDiv = document.activeElement;
+  }
+  if (!activeContentDiv || (!activeContentDiv.classList.contains('block-content') && !activeContentDiv.classList.contains('db-cell-edit'))) {
+    activeContentDiv = document.querySelector(`.block-content[data-id="${state.activeFocusedBlockId}"]`);
+  }
   if (!activeContentDiv) return;
 
-  const activeLi = linkMenuList.querySelector('li.active');
+  // 確実にフォーカスを戻して選択カーソルを復元する
+  activeContentDiv.focus();
 
-  // If no match found, create link for search name
+  // DOMのクラスに依存せず、現在の検索条件（通常ノートのみ）とアクティブインデックスから直接タイトルを取得する
+  const searchQuery = state.linkTriggerPos ? state.linkTriggerPos.search : '';
+  const filtered = getActiveNormalNotes().filter(n =>
+    n.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   let noteTitle = '';
-  if (activeLi) {
-    noteTitle = activeLi.getAttribute('data-title');
+  if (filtered.length > 0 && state.linkMenuActiveIndex >= 0 && state.linkMenuActiveIndex < filtered.length) {
+    noteTitle = filtered[state.linkMenuActiveIndex].title;
   } else {
-    // Treat the typed search string as the link
-    noteTitle = state.linkTriggerPos.search;
+    // マッチするノートがない、または新規作成の場合は入力文字をそのまま使用
+    noteTitle = searchQuery;
   }
 
   const completedLink = `[[${noteTitle}]]`;
@@ -2072,8 +2125,11 @@ function selectLinkMenuItem() {
     const endNode = range.endContainer;
     const endOffset = range.endOffset;
 
-    // 「[[」または「「「」と検索文字を合わせた文字数分だけ左に戻る
-    const backLength = 2 + state.linkTriggerPos.search.length;
+    // トリガー時のオリジナル文字数を基準に戻るため、検索窓での入力長変更によるズレが発生しません
+    const origLen = (state.linkTriggerPos && state.linkTriggerPos.originalLength !== undefined) 
+      ? state.linkTriggerPos.originalLength 
+      : searchQuery.length;
+    const backLength = 2 + origLen;
 
     if (endNode.nodeType === Node.TEXT_NODE && endOffset >= backLength) {
       // 最も一般的なケース：同じテキストノード内で完結する場合
@@ -2093,7 +2149,7 @@ function selectLinkMenuItem() {
     const newTextNode = document.createTextNode(completedLink);
     range.insertNode(newTextNode);
 
-    // カーソルを挿入したテキストノードの直後に配置してアクティブ化
+    // カーソルを挿入したテキストノード of 直後に配置してアクティブ化
     sel.removeAllRanges();
     const newRange = document.createRange();
     newRange.setStartAfter(newTextNode);
@@ -2101,11 +2157,40 @@ function selectLinkMenuItem() {
     sel.addRange(newRange);
   }
 
-  // 同期：ブロックの状態にも反映
+  // 同期：ブロックの状態またはテーブルの状態に反映
   const note = getActiveNote();
   if (note) {
-    const found = findBlockAndParent(note.blocks, state.activeFocusedBlockId);
-    if (found) found.block.content = activeContentDiv.textContent;
+    if (activeContentDiv.classList.contains('block-content')) {
+      const found = findBlockAndParent(note.blocks, state.activeFocusedBlockId);
+      if (found) found.block.content = activeContentDiv.textContent;
+    } else if (activeContentDiv.classList.contains('db-cell-edit')) {
+      // テーブルセルの場合は、所属する tr と td から行データを特定して更新
+      const tr = activeContentDiv.closest('tr');
+      const td = activeContentDiv.closest('td');
+      if (tr && td) {
+        const tableContainer = tr.closest('.database-container');
+        if (tableContainer) {
+          const blockWrapper = tableContainer.closest('.block-wrapper');
+          const blockId = blockWrapper ? blockWrapper.getAttribute('data-id') : null;
+          const found = findBlockAndParent(note.blocks, blockId);
+          if (found && found.block.properties && found.block.properties.rows) {
+            const rowIndex = Array.from(tr.parentNode.children).indexOf(tr);
+            
+            // tdのdata-col-idから列プロパティを引く
+            const colId = td.getAttribute('data-col-id');
+            const rowDataList = found.block.properties.rows;
+            const row = rowDataList[rowIndex];
+            if (row && colId) {
+              row[colId] = activeContentDiv.textContent;
+              
+              // フッターの合計値を再計算
+              const tableEl = tr.closest('table');
+              recalculateTableFooter(tableEl, found.block, rowDataList);
+            }
+          }
+        }
+      }
+    }
   }
 
   closeLinkMenu();
@@ -2117,6 +2202,620 @@ function closeLinkMenu() {
   linkMenu.style.display = 'none';
   state.linkTriggerPos = null;
   state.linkMenuActiveIndex = 0;
+  const linkMenuSearchInput = document.getElementById('link-menu-search-input');
+  if (linkMenuSearchInput) {
+    linkMenuSearchInput.value = '';
+  }
+}
+
+function initLinkMenuSearchEvents() {
+  const linkMenuSearchInput = document.getElementById('link-menu-search-input');
+  if (!linkMenuSearchInput) return;
+
+  // 検索窓で文字入力されたら絞り込む
+  linkMenuSearchInput.addEventListener('input', (e) => {
+    const val = e.target.value;
+    if (state.linkTriggerPos) {
+      state.linkTriggerPos.search = val;
+    }
+    renderLinkMenuList(val);
+  });
+
+  // 検索窓でのキー操作
+  linkMenuSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      navigateLinkMenu(1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      navigateLinkMenu(-1);
+    } else if (e.key === 'Enter') {
+      if (e.isComposing) return; // IME変換確定時はWikiLink確定処理を実行しない
+      e.preventDefault();
+      selectLinkMenuItem();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeLinkMenu();
+      const activeContentDiv = document.querySelector(`.block-content[data-id="${state.activeFocusedBlockId}"]`);
+      if (activeContentDiv) activeContentDiv.focus();
+    }
+  });
+}
+
+function getActiveNormalNotes() {
+  return state.notes.filter(note => 
+    !note.isTemplate && 
+    (!note.folderId || state.folders.some(f => f.id === note.folderId))
+  );
+}
+
+let isDragSelecting = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let selectionBox = null;
+
+let potentialDragStart = false;
+
+function setupDragSelection() {
+  const editor = document.getElementById('block-canvas');
+  if (!editor) return;
+
+  editor.addEventListener('mousedown', (e) => {
+    // ボタン、セレクト、チェックボックス、ドラッグハンドル、一括操作バーなどをクリックした場合は通常の操作
+    if (e.target.closest('button') || e.target.closest('select') || e.target.closest('input[type="checkbox"]') || e.target.closest('.drag-handle') || e.target.closest('.db-bulk-action-bar')) {
+      return;
+    }
+
+    potentialDragStart = true;
+    dragStartX = e.pageX;
+    dragStartY = e.pageY;
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (potentialDragStart && !isDragSelecting) {
+      const distance = Math.sqrt(Math.pow(e.pageX - dragStartX, 2) + Math.pow(e.pageY - dragStartY, 2));
+      
+      // 6px 以上ドラッグ（移動）させたらドラッグ選択モードに切り替える
+      if (distance > 6) {
+        isDragSelecting = true;
+        
+        // テキスト選択やデフォルト挙動をキャンセル
+        e.preventDefault();
+        window.getSelection().removeAllRanges();
+        document.activeElement.blur(); // フォーカスを解除
+        
+        // 既存の選択状態をクリア
+        clearBlockSelection();
+      }
+    }
+
+    if (!isDragSelecting) return;
+
+    // テキストハイライトの発生を徹底的に抑止
+    e.preventDefault();
+
+    const currentX = e.pageX;
+    const currentY = e.pageY;
+
+    // 仮想のドラッグ選択領域（ドキュメント絶対座標系）
+    const boxLeft = Math.min(dragStartX, currentX);
+    const boxTop = Math.min(dragStartY, currentY);
+    const boxWidth = Math.abs(dragStartX - currentX);
+    const boxHeight = Math.abs(dragStartY - currentY);
+    const boxRight = boxLeft + boxWidth;
+    const boxBottom = boxTop + boxHeight;
+
+    const blocks = document.querySelectorAll('.block-wrapper[data-id]');
+    const selectedIds = [];
+
+    blocks.forEach(blockEl => {
+      const blockId = blockEl.getAttribute('data-id');
+      if (!blockId) return;
+
+      const blockRect = blockEl.getBoundingClientRect();
+      const scrollY = window.scrollY;
+      const scrollX = window.scrollX;
+      
+      // blockRectのドキュメント座標への変換
+      const blockLeft = blockRect.left + scrollX;
+      const blockRight = blockRect.right + scrollX;
+      const blockTop = blockRect.top + scrollY;
+      const blockBottom = blockRect.bottom + scrollY;
+
+      const isOverlapping = !(
+        blockRight < boxLeft ||
+        blockLeft > boxRight ||
+        blockBottom < boxTop ||
+        blockTop > boxBottom
+      );
+
+      if (isOverlapping) {
+        selectedIds.push(blockId);
+        blockEl.classList.add('selected'); // style.cssの選択スタイルを適用
+        const check = blockEl.querySelector('.block-select-check');
+        if (check) check.checked = true;
+      } else {
+        blockEl.classList.remove('selected');
+        const check = blockEl.querySelector('.block-select-check');
+        if (check) check.checked = false;
+      }
+    });
+
+    state.selectedBlockIds = selectedIds;
+  });
+
+  document.addEventListener('mouseup', () => {
+    potentialDragStart = false;
+
+    if (isDragSelecting) {
+      isDragSelecting = false;
+      updateBlockBulkActionBar();
+    }
+
+    if (isRowDragSelecting) {
+      isRowDragSelecting = false;
+      renderEditor();
+    }
+  });
+}
+
+
+function setupBlockCopyPasteShortcuts() {
+  window.addEventListener('keydown', (e) => {
+    const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
+    const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+
+    if (state.selectedBlockIds && state.selectedBlockIds.length > 0) {
+      const activeNote = getActiveNote();
+      if (!activeNote) return;
+
+      if (isCopy) {
+        e.preventDefault();
+        const blocksToCopy = [];
+        
+        const findBlocks = (blocksList) => {
+          blocksList.forEach(b => {
+            if (state.selectedBlockIds.includes(b.id)) {
+              blocksToCopy.push(JSON.stringify(b));
+            }
+            if (b.properties && b.properties.children) {
+              findBlocks(b.properties.children);
+            }
+          });
+        };
+        findBlocks(activeNote.blocks);
+
+        state.copiedBlocksData = blocksToCopy;
+        showToast(`${blocksToCopy.length}件のブロックをコピーしました`);
+      }
+
+      if (isPaste && state.copiedBlocksData && state.copiedBlocksData.length > 0) {
+        e.preventDefault();
+        pushHistory();
+
+        const cloneAndReassignIds = (blockObj) => {
+          const cloned = JSON.parse(JSON.stringify(blockObj));
+          cloned.id = generateId();
+          if (cloned.properties && cloned.properties.children) {
+            cloned.properties.children = cloned.properties.children.map(child => cloneAndReassignIds(child));
+          }
+          return cloned;
+        };
+
+        const pastedBlocks = state.copiedBlocksData.map(jsonStr => {
+          const originalBlock = JSON.parse(jsonStr);
+          return cloneAndReassignIds(originalBlock);
+        });
+
+        let lastSelectedIndex = -1;
+        state.selectedBlockIds.forEach(id => {
+          const idx = activeNote.blocks.findIndex(b => b.id === id);
+          if (idx > lastSelectedIndex) lastSelectedIndex = idx;
+        });
+
+        if (lastSelectedIndex !== -1) {
+          activeNote.blocks.splice(lastSelectedIndex + 1, 0, ...pastedBlocks);
+        } else {
+          activeNote.blocks.push(...pastedBlocks);
+        }
+
+        saveNotesToStorage();
+        clearBlockSelection();
+        renderEditor();
+        showToast(`${pastedBlocks.length}件のブロックを貼り付けました`);
+      }
+    }
+  });
+}
+
+function showToast(msg) {
+  const existing = document.getElementById('notidian-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'notidian-toast';
+  toast.style = 'position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(13, 17, 28, 0.9); color: #fff; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; border: 1px solid var(--accent-primary); box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 10000; animation: toastFade 2s forwards;';
+  toast.textContent = msg;
+  
+  const style = document.createElement('style');
+  style.innerHTML = `
+    @keyframes toastFade {
+      0% { opacity: 0; bottom: 70px; }
+      15% { opacity: 1; bottom: 80px; }
+      85% { opacity: 1; }
+      100% { opacity: 0; bottom: 85px; }
+    }
+  `;
+  document.head.appendChild(style);
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2000);
+}
+
+// 【統合データ完全性エンジン】実在しないノートへの古いWikiリンクを自動解除（プレーンテキスト化）し、空のタグをクリーンアップ
+function cleanDeadWikiLinksAndTags() {
+  // 1. 親フォルダが存在しないゾンビノートをデータベースから完全に物理抹消！
+  state.notes = state.notes.filter(note => 
+    !note.folderId || state.folders.some(f => f.id === note.folderId)
+  );
+
+  const activeNotes = getActiveNormalNotes();
+  const activeTitlesLower = new Set(activeNotes.map(n => n.title.toLowerCase()));
+
+  activeNotes.forEach(note => {
+    const cleanBlocks = (blocksArr) => {
+      blocksArr.forEach(b => {
+        if (b.content) {
+          // [[存在しないタイトル]] ➔ 存在しないタイトル にアンリンク置換
+          const wikiRegex = /\[\[([^\]]+)\]\]/g;
+          const jpRegex = /「「([^」]+)」」/g;
+          
+          let newContent = b.content;
+          
+          // [[...]]のパース
+          newContent = newContent.replace(wikiRegex, (match, title) => {
+            const titleLower = title.trim().toLowerCase();
+            if (!activeTitlesLower.has(titleLower)) {
+              return title.trim(); // リンクを剥がして単なるテキストにする
+            }
+            return match;
+          });
+
+          // 「「...」」のパース
+          newContent = newContent.replace(jpRegex, (match, title) => {
+            const titleLower = title.trim().toLowerCase();
+            if (!activeTitlesLower.has(titleLower)) {
+              return title.trim(); // リンクを剥がす
+            }
+            return match;
+          });
+
+          if (b.content !== newContent) {
+            b.content = newContent;
+          }
+        }
+        if (b.children && b.children.length > 0) {
+          cleanBlocks(b.children);
+        }
+      });
+    };
+
+    if (note.blocks && Array.isArray(note.blocks)) {
+      cleanBlocks(note.blocks);
+    }
+
+    // ノートに付いているタグ配列から、空のタグや無効なタグを自動除外
+    if (note.tags && Array.isArray(note.tags)) {
+      note.tags = note.tags.filter(t => t && String(t).trim() !== '');
+    }
+  });
+
+  // サイドバーの既存タグ候補（datalist）を最新の綺麗な状態に完全再構築
+  updateExistingTagsDatalist();
+}
+
+function updateExistingTagsDatalist() {
+  const datalist = document.getElementById('existing-tags-datalist');
+  if (!datalist) return;
+
+  datalist.innerHTML = '';
+  const allTags = new Set();
+  getActiveNormalNotes().forEach(note => {
+    if (note.tags && Array.isArray(note.tags)) {
+      note.tags.forEach(t => {
+        const trimmed = t.trim();
+        if (trimmed) allTags.add(trimmed);
+      });
+    }
+  });
+
+  Array.from(allTags).sort().forEach(tag => {
+    const option = document.createElement('option');
+    option.value = tag;
+    datalist.appendChild(option);
+  });
+}
+
+function renderNoteTags() {
+  const tagsPanel = document.getElementById('note-tags-panel');
+  if (!tagsPanel) return;
+
+  // タグ補完用の datalist を最新化
+  updateExistingTagsDatalist();
+
+  tagsPanel.innerHTML = '';
+  const note = getActiveNote();
+  if (!note) return;
+
+  // マイグレーション：tagsプロパティがない場合は初期化
+  if (!note.tags) {
+    note.tags = [];
+  }
+
+  // 1. 既存のタグを描画
+  note.tags.forEach((tag, idx) => {
+    const chip = document.createElement('span');
+    chip.className = 'note-tag-chip';
+    chip.style.display = 'inline-flex';
+    chip.style.alignItems = 'center';
+    chip.style.gap = '6px';
+    chip.style.padding = '4px 10px';
+    chip.style.borderRadius = '14px';
+    chip.style.background = 'var(--bg-secondary, #1f2937)';
+    chip.style.border = '1px solid var(--border-color, #374151)';
+    chip.style.color = 'var(--accent-secondary, #ec4899)';
+    chip.style.fontSize = '12px';
+    chip.style.fontWeight = '500';
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = `#${tag}`;
+    chip.appendChild(textSpan);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-delete-tag';
+    deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+    deleteBtn.style.background = 'none';
+    deleteBtn.style.border = 'none';
+    deleteBtn.style.color = 'var(--text-muted)';
+    deleteBtn.style.cursor = 'pointer';
+    deleteBtn.style.padding = '0 2px';
+    deleteBtn.style.fontSize = '10px';
+    deleteBtn.style.display = 'flex';
+    deleteBtn.style.alignItems = 'center';
+    deleteBtn.style.justifyContent = 'center';
+    deleteBtn.style.transition = 'color 0.2s';
+    
+    deleteBtn.addEventListener('mouseenter', () => deleteBtn.style.color = '#ef4444');
+    deleteBtn.addEventListener('mouseleave', () => deleteBtn.style.color = 'var(--text-muted)');
+
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      note.tags.splice(idx, 1);
+      saveNotesToStorage();
+      renderNoteTags();
+      renderNoteList(); // サイドバーの更新
+    });
+
+    chip.appendChild(deleteBtn);
+    tagsPanel.appendChild(chip);
+  });
+
+  // 2. 「＋ タグを追加」ボタンまたは入力フォーム
+  const addWrapper = document.createElement('div');
+  addWrapper.style.display = 'inline-flex';
+  addWrapper.style.alignItems = 'center';
+
+  const addInput = document.createElement('input');
+  addInput.type = 'text';
+  addInput.placeholder = '+ タグを追加';
+  addInput.setAttribute('list', 'existing-tags-datalist');
+  addInput.style.border = '1px dashed var(--border-color, #374151)';
+  addInput.style.background = 'transparent';
+  addInput.style.borderRadius = '14px';
+  addInput.style.padding = '3px 10px';
+  addInput.style.fontSize = '12px';
+  addInput.style.color = 'var(--text-secondary)';
+  addInput.style.outline = 'none';
+  addInput.style.width = '85px';
+  addInput.style.transition = 'all 0.2s';
+  addInput.style.boxSizing = 'border-box';
+
+  addInput.addEventListener('focus', () => {
+    addInput.style.width = '120px';
+    addInput.style.borderStyle = 'solid';
+    addInput.style.borderColor = 'var(--accent-secondary, #ec4899)';
+  });
+
+  addInput.addEventListener('blur', () => {
+    addInput.style.width = '85px';
+    addInput.style.borderStyle = 'dashed';
+    addInput.style.borderColor = 'var(--border-color)';
+    
+    // 入力値があれば追加
+    const val = addInput.value.trim().replace(/^#/, ''); // 先頭の#は除去
+    if (val && !note.tags.includes(val)) {
+      note.tags.push(val);
+      saveNotesToStorage();
+      renderNoteTags();
+      renderNoteList(); // サイドバーの更新
+    }
+    addInput.value = '';
+  });
+
+  addInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addInput.blur(); // blurイベントを発火させて処理
+    }
+  });
+
+  addWrapper.appendChild(addInput);
+  tagsPanel.appendChild(addWrapper);
+}
+
+function renderSidebarTags() {
+  const tagsListContainer = document.getElementById('sidebar-tags-list');
+  if (!tagsListContainer) return;
+
+  tagsListContainer.innerHTML = '';
+
+  // 全ノートから重複なしでタグを抽出
+  const allTagsMap = {};
+  getActiveNormalNotes().forEach(note => {
+    if (note.tags && Array.isArray(note.tags)) {
+      note.tags.forEach(tag => {
+        const trimmed = tag.trim();
+        if (trimmed) {
+          allTagsMap[trimmed] = (allTagsMap[trimmed] || 0) + 1;
+        }
+      });
+    }
+  });
+
+  const uniqueTags = Object.keys(allTagsMap).sort();
+
+  if (uniqueTags.length === 0) {
+    tagsListContainer.innerHTML = '<span style="font-size: 11px; color: var(--text-muted); font-style: italic;">タグなし</span>';
+    return;
+  }
+
+  uniqueTags.forEach(tag => {
+    const tagEl = document.createElement('span');
+    tagEl.className = 'sidebar-tag-chip';
+    
+    // プレミアムなタグチップスタイル
+    tagEl.style.fontSize = '11px';
+    tagEl.style.padding = '3px 8px';
+    tagEl.style.borderRadius = '12px';
+    tagEl.style.background = 'var(--bg-secondary, #1f2937)';
+    tagEl.style.border = '1px solid var(--border-color, #374151)';
+    tagEl.style.color = 'var(--text-secondary, #d1d5db)';
+    tagEl.style.cursor = 'pointer';
+    tagEl.style.transition = 'all 0.2s';
+    tagEl.style.display = 'inline-flex';
+    tagEl.style.alignItems = 'center';
+    tagEl.style.gap = '6px';
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = `#${tag} (${allTagsMap[tag]})`;
+    tagEl.appendChild(textSpan);
+
+    // 削除ボタンの生成
+    const delBtn = document.createElement('span');
+    delBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+    delBtn.style.fontSize = '9px';
+    delBtn.style.opacity = '0.5';
+    delBtn.style.cursor = 'pointer';
+    delBtn.style.transition = 'opacity 0.2s, color 0.2s';
+    delBtn.style.display = 'flex';
+    delBtn.style.alignItems = 'center';
+    delBtn.style.justifyContent = 'center';
+    delBtn.title = `タグ「${tag}」をすべてのノートから削除`;
+    
+    delBtn.addEventListener('mouseenter', () => {
+      delBtn.style.opacity = '1';
+      delBtn.style.color = '#ef4444';
+    });
+    delBtn.addEventListener('mouseleave', () => {
+      delBtn.style.opacity = '0.5';
+      delBtn.style.color = 'inherit';
+    });
+
+    delBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (confirm(`タグ「${tag}」をすべてのノートから完全に削除してもよろしいですか？`)) {
+        // すべてのノートの tags 配列から一括削除
+        state.notes.forEach(note => {
+          if (note.tags && Array.isArray(note.tags)) {
+            note.tags = note.tags.filter(t => t.trim() !== tag);
+          }
+        });
+        
+        saveNotesToStorage();
+        renderNoteList();
+        renderEditor();
+      }
+    });
+
+    tagEl.appendChild(delBtn);
+
+    // チップ全体のクリックで検索
+    textSpan.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // イベントのバブリング（伝播）を完全に遮断
+
+      if (searchInput) {
+        searchInput.value = '#' + tag;
+        const clearBtn = document.getElementById('clear-search-btn');
+        if (clearBtn) clearBtn.style.display = 'block';
+        
+        // 非同期（setTimeout）で実行することで、クリックイベントの処理が完全に終了した後に安全に再描画させる
+        setTimeout(() => {
+          searchInput.dispatchEvent(new Event('input'));
+        }, 0);
+      }
+    });
+
+    tagEl.addEventListener('mouseenter', () => {
+      tagEl.style.borderColor = 'var(--accent-secondary, #ec4899)';
+    });
+
+    tagEl.addEventListener('mouseleave', () => {
+      tagEl.style.borderColor = 'var(--border-color, #374151)';
+    });
+
+    tagsListContainer.appendChild(tagEl);
+  });
+}
+
+function applySlashMenuOrder() {
+  const orderStr = localStorage.getItem('notidian_slash_menu_order');
+  if (!orderStr) return;
+
+  try {
+    const order = JSON.parse(orderStr);
+    const list = document.querySelector('#slash-menu .slash-menu-list');
+    if (!list) return;
+
+    const items = Array.from(list.querySelectorAll('li'));
+    items.sort((a, b) => {
+      const typeA = a.getAttribute('data-type');
+      const typeB = b.getAttribute('data-type');
+      return order.indexOf(typeA) - order.indexOf(typeB);
+    });
+
+    list.innerHTML = '';
+    items.forEach(item => list.appendChild(item));
+  } catch (e) {
+    console.error("Failed to apply slash menu order:", e);
+  }
+}
+
+function initSlashMenuSortable() {
+  const list = document.querySelector('#slash-menu .slash-menu-list');
+  if (!list) return;
+
+  // 保存されている順序を適用
+  applySlashMenuOrder();
+
+  // SortableJSの適用
+  new Sortable(list, {
+    animation: 150,
+    handle: '.drag-handle',
+    ghostClass: 'sortable-ghost',
+    onEnd: function() {
+      const items = Array.from(list.querySelectorAll('li'));
+      const order = items.map(li => li.getAttribute('data-type'));
+      localStorage.setItem('notidian_slash_menu_order', JSON.stringify(order));
+      
+      // 並べ替え後にアクティブインデックスがズレるのを修正
+      const activeIdx = items.findIndex(li => li.classList.contains('active'));
+      if (activeIdx !== -1) {
+        state.slashMenuActiveIndex = activeIdx;
+      }
+    }
+  });
 }
 
 // Navigation History control functions
@@ -2170,10 +2869,15 @@ function openOrCreateNoteByTitle(title) {
   let note = state.notes.find(n => n.title.toLowerCase() === title.toLowerCase());
 
   if (!note) {
+    // 現在開いているノートのフォルダIDを取得して継承する
+    const activeNote = getActiveNote();
+    const parentFolderId = activeNote ? activeNote.folderId : null;
+
     // Automatically create a new note (Obsidian-like!)
     note = {
       id: 'note-' + generateId(),
       title: title,
+      folderId: parentFolderId,
       updatedAt: Date.now(),
       blocks: [
         { id: generateId(), type: 'p', content: '' }
@@ -2201,25 +2905,54 @@ function renderNoteList() {
   noteListContainer.innerHTML = '';
   const searchVal = String(searchInput && searchInput.value || '').toLowerCase().trim();
 
-  // テンプレートを除外したノート一覧
-  const normalNotes = state.notes.filter(n => !n.isTemplate);
+  // 有効な実在する通常ノートのみを一覧表示
+  const normalNotes = getActiveNormalNotes();
 
   // 検索中かどうかの判定
   if (searchVal !== '') {
+    // 検索中ステータスヘッダー（解除リセットボタン付き）の動的追加
+    const searchHeader = document.createElement('div');
+    searchHeader.className = 'sidebar-search-status-header';
+    searchHeader.style = 'display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; margin-bottom: 8px; background: rgba(236, 72, 153, 0.08); border: 1px solid rgba(236, 72, 153, 0.25); border-radius: 6px; font-size: 11px; color: var(--text-secondary); box-shadow: 0 2px 8px rgba(0,0,0,0.15);';
+    searchHeader.innerHTML = `
+      <span><i class="fa-solid fa-filter" style="color:var(--accent-secondary, #ec4899);"></i> 検索中: "<strong>${escapeHTML(searchVal)}</strong>"</span>
+      <button class="btn-clear-search-link" style="background:none; border:none; color:var(--accent-secondary, #ec4899); cursor:pointer; font-weight:700; font-size:11px; padding:2px 6px; border-radius:4px; transition:all 0.2s;" onmouseover="this.style.background='rgba(236,72,153,0.15)'" onmouseout="this.style.background='none'">
+        <i class="fa-solid fa-rotate-left"></i> 解除
+      </button>
+    `;
+    searchHeader.querySelector('.btn-clear-search-link').addEventListener('click', () => {
+      if (searchInput) {
+        searchInput.value = '';
+        const clearBtn = document.getElementById('clear-search-btn');
+        if (clearBtn) clearBtn.style.display = 'none';
+        renderNoteList();
+      }
+    });
+    noteListContainer.appendChild(searchHeader);
+
     renderSearchTree(normalNotes, searchVal);
   } else {
     renderNormalTree(normalNotes);
   }
+  
+  // サイドバーのタグ一覧を再描画
+  renderSidebarTags();
 }
 
 function deleteNote(noteId, e) {
   showDeleteConfirmPopover(e, 'このノートを削除しますか？', () => {
     state.notes = state.notes.filter(n => n.id !== noteId);
+    
+    // データ完全性クリーンアップ（古いリンクをプレーンテキスト化 ＆ 空タグ抹消）を実行！
+    cleanDeadWikiLinksAndTags();
+    
+    // 削除状態を即座にストレージへ保存する
+    saveNotesToStorage();
+
     if (state.activeNoteId === noteId) {
       const nextNoteId = state.notes.length > 0 ? state.notes[0].id : null;
       navigateToNote(nextNoteId);
     } else {
-      saveNotesToStorage();
       renderNoteList();
       renderEditor();
     }
@@ -2328,7 +3061,7 @@ function extractOutgoingLinks(note) {
   // 抽出されたタイトルを持つ、他の実在するノートを収集
   const outgoing = [];
   linksSet.forEach(titleLower => {
-    const found = state.notes.find(n => n.title.toLowerCase() === titleLower);
+    const found = getActiveNormalNotes().find(n => n.title.toLowerCase() === titleLower);
     if (found && found.id !== note.id) {
       outgoing.push(found);
     }
@@ -2354,7 +3087,7 @@ function renderNoteLinksPanel() {
   const currentTitle = activeNote.title.toLowerCase();
 
   // 1. 戻りリンク（バックリンク）の収集
-  const referrers = state.notes.filter(note => {
+  const referrers = getActiveNormalNotes().filter(note => {
     if (note.id === activeNote.id) return false;
     return searchBlocksForTitle(note.blocks, currentTitle);
   });
@@ -4281,6 +5014,36 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
     const tr = document.createElement('tr');
     tr.className = 'db-data-row';
+
+    tr.addEventListener('mousedown', (e) => {
+      if (e.shiftKey) {
+        e.preventDefault(); // Shiftクリック時のブラウザ標準のテキストハイライトを抑制
+      }
+    });
+
+    tr.addEventListener('click', (e) => {
+      // 編集可能要素などを除外するが、Shiftキーが押されている場合は最優先で行選択を行う
+      const isEditTarget = e.target.closest('.db-cell-edit, input, button, select, .db-select-badge, .db-date-span');
+      if (isEditTarget && !e.shiftKey) {
+        // 通常のセルクリックで編集に入る際、選択状態があればリセットする
+        if ((tableSelection.selectedRows && tableSelection.selectedRows.length > 0) || (state.selectedBlockIds && state.selectedBlockIds.length > 0)) {
+          clearTableSelection();
+          clearBlockSelection();
+        }
+        return; 
+      }
+      
+      // Shiftキーが押されている場合は、入力フォーカスや標準動作を抑制する
+      if (e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      const checked = !rowCheck.checked;
+      rowCheck.checked = checked;
+      
+      handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, rowCheck);
+    });
     // 削除・一括選択コントロールtd（極小コンパクト化）
     const controlTd = document.createElement('td');
     controlTd.className = 'db-row-controls-cell';
@@ -4300,6 +5063,39 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
       e.stopPropagation();
       handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, rowCheck);
     });
+
+    // mousedownでドラッグ選択を開始
+    rowCheck.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      isRowDragSelecting = true;
+      // 反転後の新しいチェック状態を記憶
+      rowDragSelectState = !rowCheck.checked;
+      
+      // クリックとしての処理も即時実行
+      handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, rowCheck);
+    });
+
+    // mouseenterでなぞった行の状態を同期
+    rowCheck.addEventListener('mouseenter', () => {
+      if (isRowDragSelecting) {
+        if (tableSelection.blockId !== block.id) {
+          tableSelection.blockId = block.id;
+          tableSelection.selectedRows = [];
+        }
+
+        if (rowDragSelectState) {
+          if (!tableSelection.selectedRows.includes(row)) {
+            tableSelection.selectedRows.push(row);
+          }
+        } else {
+          tableSelection.selectedRows = tableSelection.selectedRows.filter(r => r !== row);
+        }
+
+        rowCheck.checked = rowDragSelectState;
+        updateBulkActionBar(block, rowDataList);
+      }
+    });
+
     controlsWrapper.appendChild(rowCheck);
 
     // ドラッグ＆ドロップ用グリップハンドルを追加
@@ -4399,10 +5195,22 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
           // フォーカスON時はプレーンな数値に
           cellDiv.addEventListener('focus', () => {
+            state.lastActiveEditTarget = cellDiv;
             cellDiv.textContent = row[col.id] !== undefined ? row[col.id] : '';
           });
         } else {
-          cellDiv.textContent = val;
+          // テキストタイプの場合はWikiリンクをパースしてHTML描画
+          if (col.type === 'text' || !col.type) {
+            cellDiv.innerHTML = parseWikiLinks(escapeHTML(val));
+          } else {
+            cellDiv.textContent = val;
+          }
+
+          // フォーカスON時はプレーンな括弧付きテキストに
+          cellDiv.addEventListener('focus', () => {
+            state.lastActiveEditTarget = cellDiv;
+            cellDiv.textContent = row[col.id] !== undefined ? row[col.id] : '';
+          });
         }
 
         cellDiv.addEventListener('blur', () => {
@@ -4411,13 +5219,49 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
             const parsed = parseFloat(newVal);
             newVal = isNaN(parsed) ? '' : parsed;
             cellDiv.textContent = newVal !== '' ? formatNumberValue(newVal, col) : '';
+          } else {
+            // フォーカスアウト時はWikiリンクをパースして再描画
+            if (col.type === 'text' || !col.type) {
+              cellDiv.innerHTML = parseWikiLinks(escapeHTML(newVal));
+            } else {
+              cellDiv.textContent = newVal;
+            }
           }
           row[col.id] = newVal;
           saveNotesToStorage();
           recalculateTableFooter(table, block, rowDataList);
         });
 
+        cellDiv.addEventListener('input', (e) => {
+          row[col.id] = cellDiv.textContent;
+          handleWikiLinkTrigger(cellDiv, e);
+        });
+
         cellDiv.addEventListener('keydown', (evt) => {
+          if (state.linkMenuOpen) {
+            if (evt.key === 'ArrowDown') {
+              evt.preventDefault();
+              navigateLinkMenu(1);
+              return;
+            }
+            if (evt.key === 'ArrowUp') {
+              evt.preventDefault();
+              navigateLinkMenu(-1);
+              return;
+            }
+            if (evt.key === 'Enter') {
+              if (evt.isComposing) return;
+              evt.preventDefault();
+              selectLinkMenuItem();
+              return;
+            }
+            if (evt.key === 'Escape') {
+              evt.preventDefault();
+              closeLinkMenu();
+              return;
+            }
+          }
+
           if (evt.key === 'Enter') {
             evt.preventDefault();
             cellDiv.blur();
@@ -5283,6 +6127,9 @@ function deleteDbColumn(block, colId) {
         }
       });
     }
+    
+    saveNotesToStorage();
+    renderEditor();
   }
 }
 
@@ -5873,9 +6720,8 @@ function showColorPalettePopover(e, onColorSelected) {
           if (f.parentId === folderId) f.parentId = null;
         });
 
-        state.notes.forEach(n => {
-          if (n.folderId === folderId) n.folderId = null;
-        });
+        // 【重要】フォルダ削除時、その中に属していたノートも連動して完全にデータベースから削除する！
+        state.notes = state.notes.filter(n => n.folderId !== folderId);
 
         state.folders = state.folders.filter(f => f.id !== folderId);
         state.collapsedFolders = state.collapsedFolders.filter(id => id !== folderId);
@@ -5956,6 +6802,12 @@ function showColorPalettePopover(e, onColorSelected) {
         e.preventDefault();
         e.stopPropagation();
 
+        // スマートフォルダ（お気に入り・未入力）へのドロップは完全に無効化・進入禁止
+        if (element.getAttribute('data-smart-folder') || element.closest('[data-smart-folder]')) {
+          e.dataTransfer.dropEffect = 'none';
+          return;
+        }
+
         if (state.draggedSidebarId === id) return;
         if (state.draggedSidebarType === 'folder' && isFolderDescendant(state.draggedSidebarId, id)) return;
 
@@ -6011,6 +6863,11 @@ function showColorPalettePopover(e, onColorSelected) {
         e.preventDefault();
         e.stopPropagation();
         hideSidebarPathPreview();
+
+        // スマートフォルダへのドロップは処理を完全に拒否して早期リターン
+        if (element.getAttribute('data-smart-folder') || element.closest('[data-smart-folder]')) {
+          return;
+        }
 
         const draggedId = state.draggedSidebarId;
         const draggedType = state.draggedSidebarType;
@@ -6473,47 +7330,65 @@ function showColorPalettePopover(e, onColorSelected) {
     }
 
     function renderSearchTree(normalNotes, searchVal) {
-      const matchedNotes = normalNotes.filter(n => n.title.toLowerCase().includes(searchVal));
-      const matchedFolders = state.folders.filter(f => f.name.toLowerCase().includes(searchVal));
+      const isTagSearch = searchVal.startsWith('#') || searchVal.startsWith('＃');
+      // 先頭のシャープ記号（# や ＃）をトリミングしたタグ検索用のワードを作成
+      const searchTagVal = searchVal.replace(/^[#＃]/, '').toLowerCase().trim();
 
-      const visibleFolderIds = new Set();
+      let matchedNotes;
 
-      matchedFolders.forEach(f => {
-        visibleFolderIds.add(f.id);
-        let parentId = f.parentId;
-        while (parentId) {
-          visibleFolderIds.add(parentId);
-          const parent = state.folders.find(x => x.id === parentId);
-          parentId = parent ? parent.parentId : null;
-        }
-      });
+      if (isTagSearch) {
+        // タグ厳密検索：タイトルは無視し、タグリストに該当ワードが含まれるノートのみ抽出
+        matchedNotes = normalNotes.filter(n => 
+          n.tags && n.tags.some(t => t.toLowerCase().includes(searchTagVal))
+        );
+      } else {
+        // 通常検索：タイトルまたはタグの部分一致
+        matchedNotes = normalNotes.filter(n => 
+          n.title.toLowerCase().includes(searchVal) ||
+          (n.tags && n.tags.some(t => t.toLowerCase().includes(searchTagVal)))
+        );
+      }
 
-      matchedNotes.forEach(n => {
-        let parentId = n.folderId;
-        while (parentId) {
-          visibleFolderIds.add(parentId);
-          const parent = state.folders.find(x => x.id === parentId);
-          parentId = parent ? parent.parentId : null;
-        }
-      });
-
-      const rootFolders = state.folders.filter(f => !f.parentId && visibleFolderIds.has(f.id));
-      const rootNotes = matchedNotes.filter(n => !n.folderId);
-
-      rootFolders.sort((a, b) => b.updatedAt - a.updatedAt);
-      rootNotes.sort((a, b) => b.updatedAt - a.updatedAt);
-
-      if (rootFolders.length === 0 && rootNotes.length === 0) {
-        noteListContainer.innerHTML = '<div class="no-data-msg">一致するノート・フォルダなし</div>';
+      if (matchedNotes.length === 0) {
+        noteListContainer.innerHTML = '<div class="no-data-msg">一致するノートなし</div>';
         return;
       }
 
-      rootFolders.forEach(folder => {
-        noteListContainer.appendChild(createSearchFolderDOM(folder, normalNotes, matchedNotes, visibleFolderIds, searchVal, 0));
-      });
+      // マッチしたノートをフラットに並べてリスト表示する（親フォルダ名ラベル付き）
+      matchedNotes.sort((a, b) => b.updatedAt - a.updatedAt);
+      matchedNotes.forEach(note => {
+        // 親フォルダ情報の取得
+        const folder = state.folders.find(f => f.id === note.folderId);
+        const folderPrefix = folder ? `<span style="font-size:10px; color:var(--text-muted); background:rgba(255,255,255,0.04); padding:1px 5px; border-radius:4px; margin-right:6px; font-weight:500; display:inline-flex; align-items:center; gap:3px;"><i class="fa-regular fa-folder"></i> ${escapeHTML(folder.name)}</span>` : '';
 
-      rootNotes.forEach(note => {
-        noteListContainer.appendChild(createSearchNoteDOM(note, searchVal, 0));
+        const li = document.createElement('li');
+        li.className = `note-item ${note.id === state.activeNoteId ? 'active' : ''}`;
+        li.style.paddingLeft = '12px';
+        li.style.display = 'flex';
+        li.style.alignItems = 'center';
+        li.style.paddingTop = '6px';
+        li.style.paddingBottom = '6px';
+
+        li.innerHTML = `
+          <i class="fa-regular fa-file-lines note-item-icon" style="margin-right:8px; font-size:12px; color:var(--text-muted);"></i>
+          <div style="flex:1; display:flex; align-items:center; min-width:0; overflow:hidden;">
+            ${folderPrefix}
+            <span class="note-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:500;">${highlightText(note.title, searchVal)}</span>
+          </div>
+          <button class="btn-delete-note" title="削除" style="margin-left:auto; display:flex; align-items:center; justify-content:center;"><i class="fa-solid fa-trash-can"></i></button>
+        `;
+
+        li.addEventListener('click', (e) => {
+          if (e.target.closest('.btn-delete-note')) {
+            e.stopPropagation();
+            deleteNote(note.id, e);
+          } else {
+            // タグチップから別のノートへ快適に遷移できるよう、検索窓の値はクリアせず保持します
+            navigateToNote(note.id);
+          }
+        });
+
+        noteListContainer.appendChild(li);
       });
     }
 
@@ -6523,6 +7398,7 @@ function showColorPalettePopover(e, onColorSelected) {
       if (favoriteNotes.length > 0) {
         const favHeader = document.createElement('div');
         favHeader.className = 'folder-header favorite-section-header';
+        favHeader.setAttribute('data-smart-folder', 'favorite');
         favHeader.style.paddingLeft = '6px';
         favHeader.style.display = 'flex';
         favHeader.style.alignItems = 'center';
@@ -6568,9 +7444,84 @@ function showColorPalettePopover(e, onColorSelected) {
           favoriteNotes.forEach(note => {
             const li = createNoteDOM(note, 1);
             li.classList.add('favorite-note-item');
+            li.setAttribute('data-smart-folder', 'favorite-item');
             favUl.appendChild(li);
           });
           noteListContainer.appendChild(favUl);
+        }
+      }
+
+      // --- 1.5 未入力のノート（スマートフォルダ）セクションの描画 ---
+      const emptyNotes = normalNotes.filter(n => 
+        n.blocks.length === 0 || 
+        (n.blocks.length === 1 && n.blocks[0].type === 'p' && !n.blocks[0].content.trim())
+      );
+
+      if (emptyNotes.length > 0) {
+        const emptyHeader = document.createElement('div');
+        emptyHeader.className = 'folder-header empty-section-header';
+        emptyHeader.setAttribute('data-smart-folder', 'empty');
+        emptyHeader.style.paddingLeft = '6px';
+        emptyHeader.style.display = 'flex';
+        emptyHeader.style.alignItems = 'center';
+        emptyHeader.style.gap = '6px';
+        emptyHeader.style.marginTop = '8px';
+        emptyHeader.style.marginBottom = '4px';
+        emptyHeader.style.cursor = 'pointer';
+
+        // キャレット（矢印）アイコンの追加
+        const caret = document.createElement('i');
+        caret.className = `fa-solid fa-caret-right caret-icon ${state.collapsedEmptyNotes ? '' : 'open'}`;
+        emptyHeader.appendChild(caret);
+
+        const folderIcon = document.createElement('i');
+        folderIcon.className = 'fa-solid fa-folder-minus folder-icon';
+        folderIcon.style.color = 'var(--accent-secondary, #ec4899)'; 
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'folder-name';
+        titleSpan.textContent = '未入力のノート';
+
+        // 個数バッジの追加
+        const badge = document.createElement('span');
+        badge.className = 'empty-badge';
+        badge.textContent = emptyNotes.length;
+        badge.style.fontSize = '10px';
+        badge.style.background = 'var(--accent-secondary, #ec4899)';
+        badge.style.color = '#fff';
+        badge.style.padding = '1px 6px';
+        badge.style.borderRadius = '10px';
+        badge.style.marginLeft = 'auto';
+        badge.style.marginRight = '8px';
+
+        emptyHeader.appendChild(folderIcon);
+        emptyHeader.appendChild(titleSpan);
+        emptyHeader.appendChild(badge);
+
+        // クリックで折りたたみをトグル
+        emptyHeader.addEventListener('click', (e) => {
+          state.collapsedEmptyNotes = !state.collapsedEmptyNotes;
+          localStorage.setItem('notidian_collapsed_empty_notes', state.collapsedEmptyNotes);
+          renderNoteList();
+        });
+
+        noteListContainer.appendChild(emptyHeader);
+
+        if (!state.collapsedEmptyNotes) {
+          const emptyUl = document.createElement('ul');
+          emptyUl.className = 'empty-notes-list';
+          emptyUl.style.listStyle = 'none';
+          emptyUl.style.margin = '0';
+          emptyUl.style.padding = '0';
+
+          emptyNotes.sort((a, b) => b.sortIndex - a.sortIndex);
+          emptyNotes.forEach(note => {
+            const li = createNoteDOM(note, 1);
+            li.classList.add('empty-note-item');
+            li.setAttribute('data-smart-folder', 'empty-item');
+            emptyUl.appendChild(li);
+          });
+          noteListContainer.appendChild(emptyUl);
         }
       }
 
@@ -6615,46 +7566,44 @@ function showColorPalettePopover(e, onColorSelected) {
       }
 
       if (e.shiftKey && lastSelectedRowIndex !== null) {
-        // 範囲選択
+        // 範囲選択：範囲内のすべての行を選択（チェック状態）に倒す
         const start = Math.min(lastSelectedRowIndex, rowIndex);
         const end = Math.max(lastSelectedRowIndex, rowIndex);
 
         for (let i = start; i <= end; i++) {
           const targetRow = rowDataList[i];
-          if (isChecked) {
-            if (!tableSelection.selectedRows.includes(targetRow)) {
-              tableSelection.selectedRows.push(targetRow);
-            }
-          } else {
-            tableSelection.selectedRows = tableSelection.selectedRows.filter(r => r !== targetRow);
-          }
-        }
+          if (!targetRow) continue;
 
-        // DOM上のチェックボックスのチェック状態を同期
-        const tableEl = document.querySelector(`.block-wrapper[data-id="${block.id}"] table`);
-        if (tableEl) {
-          const trs = tableEl.querySelectorAll('.db-data-row');
-          for (let i = start; i <= end; i++) {
-            const tr = trs[i];
-            if (tr) {
-              const check = tr.querySelector('.db-row-select-check');
-              if (check) check.checked = isChecked;
-            }
+          if (!tableSelection.selectedRows.includes(targetRow)) {
+            tableSelection.selectedRows.push(targetRow);
           }
         }
       } else {
-        // 通常の単一選択
-        if (isChecked) {
-          if (!tableSelection.selectedRows.includes(row)) {
-            tableSelection.selectedRows.push(row);
-          }
+        // 通常の選択
+        const isCheckboxClick = e.target && e.target.classList.contains('db-row-select-check');
+        if (!isCheckboxClick) {
+          // チェックボックス自体の直接クリックではない場合、一括選択をクリアしてこの行のみを選択する
+          tableSelection.selectedRows = [row];
+          checkboxEl.checked = true;
+          // ブロック選択をクリア
+          clearBlockSelection();
         } else {
-          tableSelection.selectedRows = tableSelection.selectedRows.filter(r => r !== row);
+          // チェックボックス自体のクリックはこれまでのトグル（複数選択の追加/解除）
+          if (isChecked) {
+            if (!tableSelection.selectedRows.includes(row)) {
+              tableSelection.selectedRows.push(row);
+            }
+          } else {
+            tableSelection.selectedRows = tableSelection.selectedRows.filter(r => r !== row);
+          }
         }
-        lastSelectedRowIndex = rowIndex;
       }
 
+      // 範囲選択時でも、通常選択時でも、最後にクリックしたインデックスを更新
+      lastSelectedRowIndex = rowIndex;
+
       updateBulkActionBar(block, rowDataList);
+      renderEditor();
     }
 
     function handleSelectAllChange(block, rowDataList, isChecked) {
@@ -6693,6 +7642,69 @@ function showColorPalettePopover(e, onColorSelected) {
     }
 
     window.clearBlockSelection = clearBlockSelection; // グローバル（HTMLのonclick）から参照可能にする
+
+    let lastSelectedBlockId = null;
+
+    function handleBlockClick(e, blockId) {
+      if (!state.selectedBlockIds) state.selectedBlockIds = [];
+      
+      const allBlockEls = Array.from(document.querySelectorAll('#block-canvas .block-wrapper[data-id]'));
+      const allBlockIds = allBlockEls.map(el => el.getAttribute('data-id'));
+      
+      const targetIndex = allBlockIds.indexOf(blockId);
+      if (targetIndex === -1) return;
+
+      const isSelected = !state.selectedBlockIds.includes(blockId);
+
+      if (e.shiftKey && lastSelectedBlockId !== null) {
+        const lastIndex = allBlockIds.indexOf(lastSelectedBlockId);
+        if (lastIndex !== -1) {
+          const start = Math.min(lastIndex, targetIndex);
+          const end = Math.max(lastIndex, targetIndex);
+
+          for (let i = start; i <= end; i++) {
+            const id = allBlockIds[i];
+            if (!state.selectedBlockIds.includes(id)) {
+              state.selectedBlockIds.push(id);
+            }
+          }
+        }
+      } else {
+        // 通常の選択
+        const isCheckboxClick = e.target && e.target.classList.contains('block-select-check');
+        if (!isCheckboxClick) {
+          // チェックボックス自体の直接クリックではない場合、一括選択をリセットしてこのブロックのみを選択する
+          state.selectedBlockIds = [blockId];
+          // テーブル選択をクリア
+          clearTableSelection();
+        } else {
+          // チェックボックス自体の直接クリックはこれまでのトグル（複数選択の追加/解除）
+          if (isSelected) {
+            if (!state.selectedBlockIds.includes(blockId)) {
+              state.selectedBlockIds.push(blockId);
+            }
+          } else {
+            state.selectedBlockIds = state.selectedBlockIds.filter(item => item !== blockId);
+          }
+        }
+      }
+
+      lastSelectedBlockId = blockId;
+
+      allBlockEls.forEach(el => {
+        const id = el.getAttribute('data-id');
+        const check = el.querySelector('.block-select-check');
+        if (state.selectedBlockIds.includes(id)) {
+          el.classList.add('selected');
+          if (check) check.checked = true;
+        } else {
+          el.classList.remove('selected');
+          if (check) check.checked = false;
+        }
+      });
+
+      updateBlockBulkActionBar();
+    }
 
     function updateBlockBulkActionBar() {
       const bar = document.getElementById('block-bulk-action-bar');
@@ -6784,6 +7796,44 @@ function showColorPalettePopover(e, onColorSelected) {
         renderEditor();
       });
       container.appendChild(delBtn);
+
+      // --- 1.5 一括複製挿入（コピペ） ---
+      const cloneBtn = document.createElement('button');
+      cloneBtn.className = 'btn-bulk-action';
+      cloneBtn.style.background = 'rgba(139, 92, 246, 0.18)'; // 落ち着いた半透明の紫色
+      cloneBtn.style.border = '1px solid rgba(139, 92, 246, 0.4)'; // 上品なガラス枠
+      cloneBtn.style.color = 'var(--text-primary)';
+      cloneBtn.innerHTML = '<i class="fa-regular fa-clipboard"></i> 複製挿入';
+      cloneBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pushHistory();
+        
+        // 選択された行の複製（一意の新規IDを再生成）
+        const copiedRows = tableSelection.selectedRows.map(r => {
+          const newRow = JSON.parse(JSON.stringify(r));
+          newRow.id = 'row-' + generateId();
+          return newRow;
+        });
+
+        // 選択された行の中で、現在のblock.properties.rows内で最も後ろにあるインデックスを特定
+        let maxIndex = -1;
+        tableSelection.selectedRows.forEach(r => {
+          const idx = block.properties.rows.indexOf(r);
+          if (idx > maxIndex) maxIndex = idx;
+        });
+
+        if (maxIndex !== -1) {
+          // 最も後ろにある行の直後に一括挿入！
+          block.properties.rows.splice(maxIndex + 1, 0, ...copiedRows);
+        } else {
+          block.properties.rows.push(...copiedRows);
+        }
+
+        saveNotesToStorage();
+        clearTableSelection();
+        renderEditor();
+      });
+      container.appendChild(cloneBtn);
 
       // --- 2. プロパティ動的一括変更 ---
       const propChangeWrapper = document.createElement('div');
@@ -7236,6 +8286,10 @@ function showColorPalettePopover(e, onColorSelected) {
     window.addEventListener('DOMContentLoaded', () => {
       initStorage();
       setupBlockBulkActionEvents();
+      initLinkMenuSearchEvents();
+      initSlashMenuSortable();
+      setupDragSelection();
+      setupBlockCopyPasteShortcuts();
 
       // Accordion Toggles
       document.querySelectorAll('.accordion-header').forEach(header => {
@@ -7267,12 +8321,36 @@ function showColorPalettePopover(e, onColorSelected) {
       renderEditor();
       updateTimerTargetTableSelect();
 
+      // 検索窓クリアボタンのイベント登録と表示連動
+      const clearSearchBtn = document.getElementById('clear-search-btn');
+      if (clearSearchBtn && searchInput) {
+        clearSearchBtn.addEventListener('click', () => {
+          searchInput.value = '';
+          clearSearchBtn.style.display = 'none';
+          renderNoteList();
+        });
+
+        searchInput.addEventListener('input', () => {
+          if (searchInput.value) {
+            clearSearchBtn.style.display = 'block';
+          } else {
+            clearSearchBtn.style.display = 'none';
+          }
+        });
+      }
+
       // メモの下段の枠外をクリックしたら行追加
       if (blockCanvas) {
         blockCanvas.addEventListener('click', (e) => {
           if (e.target === blockCanvas) {
             const note = getActiveNote();
             if (!note) return;
+
+            // 選択状態があればリセットして終了（新規行追加は行わない）
+            if (state.selectedBlockIds && state.selectedBlockIds.length > 0) {
+              clearBlockSelection();
+              return;
+            }
 
             // すでに最後のブロックが空の段落であれば、新しく追加せずそこにフォーカスする
             const lastBlock = note.blocks[note.blocks.length - 1];
@@ -8647,6 +9725,7 @@ function showColorPalettePopover(e, onColorSelected) {
           chartRenderType: 'split',
           chartTagMode: 'all',
           chartSelectedTag: '',
+          chartSelectedTags: [],
           filters: []
         };
         block.properties.views = [activeView];
@@ -8656,7 +9735,8 @@ function showColorPalettePopover(e, onColorSelected) {
         activeView.chartDateGroup = activeView.chartDateGroup || 'month';
         activeView.chartRenderType = activeView.chartRenderType || 'split'; // 🆕 表示形式のデフォルト値
         activeView.chartTagMode = activeView.chartTagMode || 'all'; // 🆕 'all' or 'single'
-        activeView.chartSelectedTag = activeView.chartSelectedTag !== undefined ? activeView.chartSelectedTag : ''; // 🆕 選択された単一のタグ文字列
+        activeView.chartSelectedTag = activeView.chartSelectedTag !== undefined ? activeView.chartSelectedTag : ''; // 🆕 選択された単一 of タグ文字列
+        activeView.chartSelectedTags = activeView.chartSelectedTags || (activeView.chartSelectedTag ? [activeView.chartSelectedTag] : []);
         activeView.filters = activeView.filters || [];
       }
 
@@ -8767,7 +9847,7 @@ function showColorPalettePopover(e, onColorSelected) {
       // C. グループ（横軸）セレクトの追加
       const xColLabel = document.createElement('label');
       xColLabel.style = 'font-size: 10px; color: var(--text-secondary); font-weight: 700; display: flex; align-items: center; gap: 6px; cursor: pointer;';
-      xColLabel.innerHTML = '<i class="fa-solid fa-tags" style="color:var(--accent-secondary);"></i> グループ';
+      xColLabel.innerHTML = '<i class="fa-solid fa-list-ul" style="color:var(--accent-secondary);"></i> グループ';
 
       const xColSelect = document.createElement('select');
       xColSelect.className = 'db-filter-val-select';
@@ -8789,7 +9869,7 @@ function showColorPalettePopover(e, onColorSelected) {
       xColLabel.appendChild(xColSelect);
       headerLeft.appendChild(xColLabel);
 
-      // 🆕 表示対象（全タグ・タグ指定トグルタブ ＆ プルダウンセレクト）の新設
+      // 🆕 表示対象（全セレクトタグ・セレクトタグ指定トグルタブ ＆ プルダウンセレクト）の新設
       const tagFilterWrapper = document.createElement('div');
       tagFilterWrapper.style = 'display: flex; align-items: center; gap: 8px;';
 
@@ -8799,7 +9879,7 @@ function showColorPalettePopover(e, onColorSelected) {
 
       const tabAll = document.createElement('button');
       tabAll.style = `padding: 2px 8px; font-size: 11px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; background: ${activeView.chartTagMode === 'all' ? 'var(--accent-primary)' : 'transparent'}; color: ${activeView.chartTagMode === 'all' ? '#fff' : 'var(--text-secondary)'}; transition: all 0.2s ease;`;
-      tabAll.textContent = '全タグ';
+      tabAll.textContent = '全セレクトタグ';
       tabAll.addEventListener('click', (e) => {
         e.stopPropagation();
         activeView.chartTagMode = 'all';
@@ -8809,7 +9889,7 @@ function showColorPalettePopover(e, onColorSelected) {
 
       const tabSelect = document.createElement('button');
       tabSelect.style = `padding: 2px 8px; font-size: 11px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; background: ${activeView.chartTagMode === 'single' ? 'var(--accent-primary)' : 'transparent'}; color: ${activeView.chartTagMode === 'single' ? '#fff' : 'var(--text-secondary)'}; transition: all 0.2s ease;`;
-      tabSelect.textContent = 'タグ指定';
+      tabSelect.textContent = 'セレクトタグ指定';
       tabSelect.addEventListener('click', (e) => {
         e.stopPropagation();
         activeView.chartTagMode = 'single';
@@ -8824,6 +9904,26 @@ function showColorPalettePopover(e, onColorSelected) {
       if (activeView.chartTagMode === 'single') {
         // データベース内のユニークなタグ（値）を抽出
         const uniqueTags = new Set();
+
+        // X軸が「セレクトタグ」または「ステータス」列の場合、定義されているすべての選択肢オプションを自動挿入
+        if (xCol) {
+          if (xCol.type === 'select' && xCol.options && Array.isArray(xCol.options)) {
+            xCol.options.forEach(opt => {
+              if (opt) {
+                const name = typeof opt === 'string' ? opt : (opt.name || opt.id || '');
+                if (name) uniqueTags.add(name.trim());
+              }
+            });
+          } else if (xCol.type === 'status' && xCol.options && Array.isArray(xCol.options)) {
+            xCol.options.forEach(opt => {
+              if (opt) {
+                const name = typeof opt === 'string' ? opt : (opt.name || opt.id || '');
+                if (name) uniqueTags.add(name.trim());
+              }
+            });
+          }
+        }
+
         const rows = rowDataList || [];
         rows.forEach(row => {
           if (xCol) {
@@ -8842,33 +9942,111 @@ function showColorPalettePopover(e, onColorSelected) {
 
         const tagList = Array.from(uniqueTags);
 
-        // 初期値が空、またはタグ一覧に存在しない場合、最初のタグ名に設定
-        if (!activeView.chartSelectedTag || !uniqueTags.has(activeView.chartSelectedTag)) {
-          activeView.chartSelectedTag = tagList[0] || '';
+        // 複数選択用プロパティの初期化・同期
+        activeView.chartSelectedTags = activeView.chartSelectedTags || [];
+        if (activeView.chartSelectedTags.length === 0 && activeView.chartSelectedTag) {
+          activeView.chartSelectedTags = [activeView.chartSelectedTag];
+        }
+        if (activeView.chartSelectedTags.length === 0 && tagList.length > 0) {
+          activeView.chartSelectedTags = [tagList[0]];
         }
 
-        const selectEl = document.createElement('select');
-        selectEl.className = 'db-filter-val-select';
-        selectEl.style.fontSize = '11px';
-        selectEl.style.padding = '2px 6px';
+        const selectBtn = document.createElement('button');
+        selectBtn.className = 'db-filter-val-select';
+        selectBtn.style = 'font-size: 11px; padding: 3px 8px; background: rgba(255,255,255,0.06); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 6px; position: relative; font-weight: 600;';
 
-        if (tagList.length === 0) {
-          selectEl.innerHTML = '<option value="">タグなし</option>';
-          selectEl.disabled = true;
-        } else {
-          selectEl.innerHTML = tagList.map(tag => `
-        <option value="${escapeHTML(tag)}" ${activeView.chartSelectedTag === tag ? 'selected' : ''}>${escapeHTML(tag)}</option>
-      `).join('');
-        }
+        const updateBtnLabel = () => {
+          const selectedCount = activeView.chartSelectedTags.filter(t => uniqueTags.has(t)).length;
+          if (selectedCount === 0) {
+            selectBtn.innerHTML = 'タグ未指定 <i class="fa-solid fa-chevron-down" style="font-size:9px; opacity:0.7;"></i>';
+          } else if (selectedCount === tagList.length) {
+            selectBtn.innerHTML = '全タグ指定中 <i class="fa-solid fa-chevron-down" style="font-size:9px; opacity:0.7;"></i>';
+          } else {
+            selectBtn.innerHTML = `タグ指定 (${selectedCount}) <i class="fa-solid fa-chevron-down" style="font-size:9px; opacity:0.7;"></i>`;
+          }
+        };
+        updateBtnLabel();
 
-        selectEl.addEventListener('change', (e) => {
+        selectBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          activeView.chartSelectedTag = selectEl.value;
-          saveNotesToStorage();
-          renderEditor();
+
+          const existingPopover = document.getElementById('db-chart-multi-tag-popover');
+          if (existingPopover) {
+            existingPopover.remove();
+            return;
+          }
+
+          const popover = document.createElement('div');
+          popover.id = 'db-chart-multi-tag-popover';
+          popover.style = 'position: fixed; z-index: 9999; background: rgba(20, 24, 38, 0.96); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); padding: 6px; min-width: 170px; max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px;';
+
+          const rect = selectBtn.getBoundingClientRect();
+          popover.style.top = `${rect.bottom + window.scrollY + 6}px`;
+          popover.style.left = `${rect.left + window.scrollX}px`;
+
+          if (tagList.length === 0) {
+            const noTag = document.createElement('div');
+            noTag.style = 'font-size: 11px; padding: 6px 10px; color: var(--text-muted); text-align: center;';
+            noTag.textContent = 'タグなし';
+            popover.appendChild(noTag);
+          } else {
+            tagList.forEach(tag => {
+              const label = document.createElement('label');
+              label.style = 'display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; font-size: 11px; color: var(--text-primary); cursor: pointer; transition: background 0.15s ease; user-select: none;';
+              
+              label.addEventListener('mouseenter', () => {
+                label.style.background = 'rgba(255,255,255,0.08)';
+              });
+              label.addEventListener('mouseleave', () => {
+                label.style.background = 'transparent';
+              });
+
+              const checkbox = document.createElement('input');
+              checkbox.type = 'checkbox';
+              checkbox.style = 'cursor: pointer; width: 13px; height: 13px; accent-color: var(--accent-primary); margin: 0;';
+              checkbox.checked = activeView.chartSelectedTags.includes(tag);
+
+              checkbox.addEventListener('change', (evt) => {
+                evt.stopPropagation();
+                if (checkbox.checked) {
+                  if (!activeView.chartSelectedTags.includes(tag)) {
+                    activeView.chartSelectedTags.push(tag);
+                  }
+                } else {
+                  activeView.chartSelectedTags = activeView.chartSelectedTags.filter(t => t !== tag);
+                }
+                activeView.chartSelectedTag = activeView.chartSelectedTags[0] || '';
+                saveNotesToStorage();
+                updateBtnLabel();
+              });
+
+              label.appendChild(checkbox);
+
+              const span = document.createElement('span');
+              span.textContent = tag;
+              span.style = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+              label.appendChild(span);
+
+              popover.appendChild(label);
+            });
+          }
+
+          document.body.appendChild(popover);
+
+          const closePopover = (evt) => {
+            if (!popover.contains(evt.target) && evt.target !== selectBtn) {
+              popover.remove();
+              document.removeEventListener('click', closePopover);
+              renderEditor(); // 閉じた瞬間に再描画してグラフを動的に更新！
+            }
+          };
+
+          setTimeout(() => {
+            document.addEventListener('click', closePopover);
+          }, 0);
         });
 
-        tagFilterWrapper.appendChild(selectEl);
+        tagFilterWrapper.appendChild(selectBtn);
       }
 
       headerLeft.appendChild(tagFilterWrapper);
@@ -8927,19 +10105,6 @@ function showColorPalettePopover(e, onColorSelected) {
       }
 
       controlHeader.appendChild(headerLeft);
-
-      // 右側の「フィルターを追加」ボタン（軸設定ボタンの代わり）
-      const headerRight = document.createElement('div');
-      const filterBtn = document.createElement('button');
-      filterBtn.className = 'btn-secondary';
-      filterBtn.innerHTML = '<i class="fa-solid fa-filter"></i> フィルターを追加';
-      filterBtn.style.padding = '4px 8px; font-size:11px;';
-      filterBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showFilterConfigPopover(e, block, activeView);
-      });
-      headerRight.appendChild(filterBtn);
-      controlHeader.appendChild(headerRight);
 
       container.appendChild(controlHeader);
 
@@ -9279,9 +10444,10 @@ function showColorPalettePopover(e, onColorSelected) {
           }
         }
 
-        // 2.5 表示対象タグのフィルタリング (単一タグ指定モード時のみ)
-        if (activeView.chartTagMode === 'single' && activeView.chartSelectedTag !== undefined) {
-          if (tagVal !== activeView.chartSelectedTag) {
+        // 2.5 表示対象タグのフィルタリング (タグ指定モード時)
+        if (activeView.chartTagMode === 'single') {
+          const selectedTags = activeView.chartSelectedTags || (activeView.chartSelectedTag ? [activeView.chartSelectedTag] : []);
+          if (selectedTags.length > 0 && !selectedTags.includes(tagVal)) {
             return;
           }
         }
@@ -9304,7 +10470,10 @@ function showColorPalettePopover(e, onColorSelected) {
 
       // chartDataの定義：総和valueと、タグ別のtagsを持つようにマッピング！
       const chartData = Object.entries(aggregatedData).map(([label, tagObj]) => {
-        const total = Object.values(tagObj).reduce((a, b) => a + b, 0);
+        const total = Object.values(tagObj).reduce((a, b) => {
+          const num = parseFloat(b);
+          return a + (isNaN(num) ? 0 : num);
+        }, 0);
         return {
           label,
           value: total,
