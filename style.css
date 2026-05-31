@@ -136,12 +136,14 @@ body {
   font-weight: 800;
   background: linear-gradient(135deg, #a78bfa 0%, #ec4899 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .brand-icon {
   background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 0 5px rgba(139, 92, 246, 0.4));
 }
@@ -1968,7 +1970,8 @@ svg#cumulative-chart {
   outline: none;
 }
 
-# Column Header Setting Popover .db-col-popover {
+/* Column Header Setting Popover .db-col-popover */
+.db-col-popover {
   width: 200px;
 }
 
@@ -3545,8 +3548,10 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
    PREMIUM BLOCK MULTI-SELECTION STYLING
    ========================================= */
 .block-wrapper.selected {
-  background-color: rgba(59, 130, 246, 0.09) !important; /* 美しい半透明ブルー（ハイライト青） */
-  border-left: 3px solid #3b82f6 !important; /* 鮮やかなブルー */
+  background-color: rgba(59, 130, 246, 0.09) !important;
+  /* 美しい半透明ブルー（ハイライト青） */
+  border-left: 3px solid #3b82f6 !important;
+  /* 鮮やかなブルー */
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.2) !important;
   transition: background-color 0.20s ease, border-left 0.20s ease !important;
 }
@@ -3594,6 +3599,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
     opacity: 0;
     transform: translateY(-6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);

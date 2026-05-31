@@ -2586,50 +2586,11 @@ function cleanDeadWikiLinksAndTags() {
   );
 
   const activeNotes = getActiveNormalNotes();
-  const activeTitlesLower = new Set(activeNotes.map(n => n.title.toLowerCase()));
+
+  // (実在しないノートへのWikiリンクは、ピンク色の破線リンクから新規ノート自動作成に移行するために維持すべきなので、
+  // ここでの自動アンリンク置換処理は削除します)
 
   activeNotes.forEach(note => {
-    const cleanBlocks = (blocksArr) => {
-      blocksArr.forEach(b => {
-        if (b.content) {
-          // [[存在しないタイトル]] ➔ 存在しないタイトル にアンリンク置換
-          const wikiRegex = /\[\[([^\]]+)\]\]/g;
-          const jpRegex = /「「([^」]+)」」/g;
-          
-          let newContent = b.content;
-          
-          // [[...]]のパース
-          newContent = newContent.replace(wikiRegex, (match, title) => {
-            const titleLower = title.trim().toLowerCase();
-            if (!activeTitlesLower.has(titleLower)) {
-              return title.trim(); // リンクを剥がして単なるテキストにする
-            }
-            return match;
-          });
-
-          // 「「...」」のパース
-          newContent = newContent.replace(jpRegex, (match, title) => {
-            const titleLower = title.trim().toLowerCase();
-            if (!activeTitlesLower.has(titleLower)) {
-              return title.trim(); // リンクを剥がす
-            }
-            return match;
-          });
-
-          if (b.content !== newContent) {
-            b.content = newContent;
-          }
-        }
-        if (b.children && b.children.length > 0) {
-          cleanBlocks(b.children);
-        }
-      });
-    };
-
-    if (note.blocks && Array.isArray(note.blocks)) {
-      cleanBlocks(note.blocks);
-    }
-
     // ノートに付いているタグ配列から、空のタグや無効なタグを自動除外
     if (note.tags && Array.isArray(note.tags)) {
       note.tags = note.tags.filter(t => t && String(t).trim() !== '');
@@ -3037,17 +2998,30 @@ function renderNoteList() {
 
   // 検索中かどうかの判定
   if (searchVal !== '') {
-    // 検索中ステータスヘッダー（解除リセットボタン付き）の動的追加
+    // 検索中ステータスヘッダー（決定＆解除ボタン付き）の動的追加
     const searchHeader = document.createElement('div');
     searchHeader.className = 'sidebar-search-status-header';
-    searchHeader.style = 'display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; margin-bottom: 8px; background: rgba(236, 72, 153, 0.08); border: 1px solid rgba(236, 72, 153, 0.25); border-radius: 6px; font-size: 11px; color: var(--text-secondary); box-shadow: 0 2px 8px rgba(0,0,0,0.15);';
+    searchHeader.style = 'display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin-bottom: 12px; background: rgba(236, 72, 153, 0.06); border: 1px solid rgba(236, 72, 153, 0.2); border-radius: 8px; font-size: 11px; color: var(--text-secondary); box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
     searchHeader.innerHTML = `
-      <span><i class="fa-solid fa-filter" style="color:var(--accent-secondary, #ec4899);"></i> 検索中: "<strong>${escapeHTML(searchVal)}</strong>"</span>
-      <button class="btn-clear-search-link" style="background:none; border:none; color:var(--accent-secondary, #ec4899); cursor:pointer; font-weight:700; font-size:11px; padding:2px 6px; border-radius:4px; transition:all 0.2s;" onmouseover="this.style.background='rgba(236,72,153,0.15)'" onmouseout="this.style.background='none'">
-        <i class="fa-solid fa-rotate-left"></i> 解除
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+        <span><i class="fa-solid fa-filter" style="color:var(--accent-secondary, #ec4899);"></i> 検索中: "<strong>${escapeHTML(searchVal)}</strong>"</span>
+        <button class="btn-clear-search-link" style="background:none; border:none; color:var(--text-muted, #6b7280); cursor:pointer; font-weight:500; font-size:11px; padding:2px 6px; border-radius:4px; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='none'" title="検索をキャンセルしてリセット">
+          <i class="fa-solid fa-rotate-left"></i> 解除
+        </button>
+      </div>
+      <button class="btn-confirm-note" style="width: 100%; background: var(--accent-secondary, #ec4899); border: none; color: white; cursor: pointer; font-weight: 700; font-size: 11px; padding: 6px 10px; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(236, 72, 153, 0.25);" onmouseover="this.style.opacity='0.9'; this.style.transform='translateY(-0.5px)'" onmouseout="this.style.opacity='1'; this.style.transform='none'">
+        <i class="fa-solid fa-check"></i> このノートに決定
       </button>
     `;
     searchHeader.querySelector('.btn-clear-search-link').addEventListener('click', () => {
+      if (searchInput) {
+        searchInput.value = '';
+        const clearBtn = document.getElementById('clear-search-btn');
+        if (clearBtn) clearBtn.style.display = 'none';
+        renderNoteList();
+      }
+    });
+    searchHeader.querySelector('.btn-confirm-note').addEventListener('click', () => {
       if (searchInput) {
         searchInput.value = '';
         const clearBtn = document.getElementById('clear-search-btn');
