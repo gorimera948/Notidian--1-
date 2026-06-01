@@ -188,7 +188,8 @@
         <div class="search-box" style="position: relative; display: flex; align-items: center; width: 100%;">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
           <input type="text" id="search-notes" placeholder="ノート・フォルダを検索..." style="width: 100%; padding-right: 28px;">
-          <button id="clear-search-btn" class="btn-clear-search" title="検索をリセット" style="display: none; position: absolute; right: 8px; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; font-size: 12px; transition: color 0.2s;">
+          <button id="clear-search-btn" class="btn-clear-search" title="検索をリセット"
+            style="display: none; position: absolute; right: 8px; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; font-size: 12px; transition: color 0.2s;">
             <i class="fa-solid fa-circle-xmark"></i>
           </button>
         </div>
@@ -196,8 +197,10 @@
           <!-- Dynamically populated -->
         </ul>
         <!-- Tags Section inside sidebar -->
-        <div class="sidebar-tags-wrapper" style="margin-top: 20px; padding: 0 12px; border-top: 1px solid var(--border-color, #374151); padding-top: 16px;">
-          <div style="font-size: 11px; font-weight: 700; color: var(--text-muted, #6b7280); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+        <div class="sidebar-tags-wrapper"
+          style="margin-top: 20px; padding: 0 12px; border-top: 1px solid var(--border-color, #374151); padding-top: 16px;">
+          <div
+            style="font-size: 11px; font-weight: 700; color: var(--text-muted, #6b7280); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
             <i class="fa-solid fa-tags" style="color: var(--accent-secondary, #ec4899);"></i> タグ一覧
           </div>
           <div id="sidebar-tags-list" style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -235,7 +238,9 @@
           <input type="text" id="note-title-input" class="note-title-input" placeholder="無題" value="">
         </div>
         <!-- Note Tags Panel -->
-        <div id="note-tags-panel" class="note-tags-panel" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 54px 16px 54px; padding: 0;"></div>
+        <div id="note-tags-panel" class="note-tags-panel"
+          style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 54px 16px 54px; padding: 0;">
+        </div>
 
         <!-- Bidirectional Navigation Panel -->
         <div id="note-links-panel" class="note-links-panel"></div>
@@ -257,7 +262,8 @@
         <div class="slash-menu-header">ブロックタイプを選択</div>
         <ul class="slash-menu-list">
           <li data-type="p" class="active">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-paragraph"></i>
             <div>
               <span class="menu-label">テキスト</span>
@@ -265,7 +271,8 @@
             </div>
           </li>
           <li data-type="h1">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-heading" style="transform: scale(0.95);"></i>
             <div>
               <span class="menu-label">見出し 1</span>
@@ -273,7 +280,8 @@
             </div>
           </li>
           <li data-type="h2">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-heading" style="transform: scale(0.85);"></i>
             <div>
               <span class="menu-label">見出し 2</span>
@@ -281,7 +289,8 @@
             </div>
           </li>
           <li data-type="toggle">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-caret-right"></i>
             <div>
               <span class="menu-label">トグルリスト</span>
@@ -289,7 +298,8 @@
             </div>
           </li>
           <li data-type="todo">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-regular fa-square-check"></i>
             <div>
               <span class="menu-label">ToDoリスト</span>
@@ -297,7 +307,8 @@
             </div>
           </li>
           <li data-type="bullet">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-list-ul"></i>
             <div>
               <span class="menu-label">箇条書きリスト</span>
@@ -305,7 +316,8 @@
             </div>
           </li>
           <li data-type="database">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-table"></i>
             <div>
               <span class="menu-label">テーブルビュー</span>
@@ -313,7 +325,8 @@
             </div>
           </li>
           <li data-type="callout">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-regular fa-lightbulb"></i>
             <div>
               <span class="menu-label">コールアウト</span>
@@ -321,7 +334,8 @@
             </div>
           </li>
           <li data-type="divider">
-            <i class="fa-solid fa-grip-vertical drag-handle" style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-minus"></i>
             <div>
               <span class="menu-label">区切り線</span>
@@ -334,8 +348,10 @@
       <!-- WikiLink Autocomplete Menu -->
       <div id="link-menu" class="link-menu">
         <div class="link-menu-header">ノートをリンク...</div>
-        <div class="link-menu-search-wrapper" style="padding: 8px 12px; border-bottom: 1px solid var(--border-color, #e5e7eb);">
-          <input type="text" id="link-menu-search-input" placeholder="キーワードを入力して検索..." style="width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-color, #e5e7eb); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; outline: none; box-sizing: border-box;">
+        <div class="link-menu-search-wrapper"
+          style="padding: 8px 12px; border-bottom: 1px solid var(--border-color, #e5e7eb);">
+          <input type="text" id="link-menu-search-input" placeholder="キーワードを入力して検索..."
+            style="width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-color, #e5e7eb); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; outline: none; box-sizing: border-box;">
         </div>
         <ul id="link-menu-list" class="link-menu-list">
           <!-- Populated dynamically with notes list -->
@@ -422,7 +438,8 @@
   </div>
 
   <!-- Floating Block Bulk Action Bar -->
-  <div id="block-bulk-action-bar" class="db-bulk-action-bar" style="display: none; border-color: var(--accent-secondary, #ec4899); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), 0 0 15px rgba(236, 72, 153, 0.25);">
+  <div id="block-bulk-action-bar" class="db-bulk-action-bar"
+    style="display: none; border-color: var(--accent-secondary, #ec4899); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), 0 0 15px rgba(236, 72, 153, 0.25);">
     <div class="bulk-info">
       <i class="fa-solid fa-square-check" style="color: var(--accent-secondary); margin-right: 6px;"></i>
       <span id="block-bulk-select-count">0</span> 件のブロック選択中

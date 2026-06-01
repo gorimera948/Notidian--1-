@@ -68,6 +68,14 @@ function pushHistory() {
 }
 
 function undo() {
+  // アンドゥ実行前に、現在編集中（フォーカスされている）要素があればその変更を強制確定（blur）させて同期する
+  if (document.activeElement && typeof document.activeElement.blur === 'function' && (document.activeElement.classList.contains('block-content') || document.activeElement.classList.contains('db-cell-edit'))) {
+    document.activeElement.blur();
+  }
+
+  // 現在の状態を確実にヒストリへ追加して同期
+  pushHistory();
+
   if (historyState.undoStack.length <= 1) return; // 初期状態のみ、または空の場合は戻せない
 
   historyState.isApplying = true;
@@ -1082,6 +1090,10 @@ function createEditableContent(block) {
     handleEditorKeydown(e, block, contentDiv);
   });
 
+  contentDiv.addEventListener('paste', (e) => {
+    handleBlockPaste(e, block, contentDiv);
+  });
+
   return contentDiv;
 }
 
@@ -1987,8 +1999,11 @@ function renderSlashMenuList() {
       li.classList.remove('active');
     }
 
-    // Click trigger
+    // Click trigger (ドラッグハンドルやブロックアイコン操作時は決定をスルーして並び替え可能にする)
     li.onmousedown = (e) => {
+      if (e.target.closest('.drag-handle') || e.target.tagName.toLowerCase() === 'i') {
+        return; // 並び替えドラッグを優先するため決定処理を実行しない
+      }
       e.preventDefault();
       state.slashMenuActiveIndex = idx;
       selectSlashMenuItem();
@@ -2393,6 +2408,26 @@ let lastSelectionRange = null; // 🆕 ドラッグ選択の最新状態を一�
 
 let potentialDragStart = false;
 
+function getFirstTextNode(el) {
+  if (el.nodeType === Node.TEXT_NODE) return el;
+  for (let i = 0; i < el.childNodes.length; i++) {
+    const node = el.childNodes[i];
+    const textNode = getFirstTextNode(node);
+    if (textNode) return textNode;
+  }
+  return null;
+}
+
+function getLastTextNode(el) {
+  if (el.nodeType === Node.TEXT_NODE) return el;
+  for (let i = el.childNodes.length - 1; i >= 0; i--) {
+    const node = el.childNodes[i];
+    const textNode = getLastTextNode(node);
+    if (textNode) return textNode;
+  }
+  return null;
+}
+
 function setupDragSelection() {
   const editor = document.getElementById('block-canvas');
   if (!editor) return;
@@ -2452,12 +2487,70 @@ function setupDragSelection() {
 
       // 開始点と終了点の前後関係を正しく比較して範囲を決定
       const compare = startRange.compareBoundaryPoints(Range.START_TO_START, currentRange);
-      if (compare <= 0) {
-        newRange.setStart(startRange.startContainer, startRange.startOffset);
-        newRange.setEnd(currentRange.startContainer, currentRange.startOffset);
+      
+      const startNode = startRange.startContainer;
+      const currentNode = currentRange.startContainer;
+      const startBlock = startNode.nodeType === Node.TEXT_NODE ? startNode.parentNode.closest('.block-content') : startNode.closest('.block-content');
+      const currentBlock = currentNode.nodeType === Node.TEXT_NODE ? currentNode.parentNode.closest('.block-content') : currentNode.closest('.block-content');
+
+      let startContainer = startRange.startContainer;
+      let startOffset = startRange.startOffset;
+      let endContainer = currentRange.startContainer;
+      let endOffset = currentRange.startOffset;
+
+      if (startBlock && currentBlock && startBlock !== currentBlock) {
+        if (compare <= 0) {
+          // 下方向へのドラッグ：開始位置を startBlock の先頭にし、終了位置を currentBlock の末尾にする（1行目の漏れを防ぎ、最後まで確実に選択）
+          const firstTextNode = getFirstTextNode(startBlock);
+          if (firstTextNode) {
+            startContainer = firstTextNode;
+            startOffset = 0;
+          } else {
+            startContainer = startBlock;
+            startOffset = 0;
+          }
+
+          const lastTextNode = getLastTextNode(currentBlock);
+          if (lastTextNode) {
+            endContainer = lastTextNode;
+            endOffset = lastTextNode.textContent.length;
+          } else {
+            endContainer = currentBlock;
+            endOffset = currentBlock.childNodes.length;
+          }
+        } else {
+          // 上方向へのドラッグ：開始位置を currentBlock の先頭にし、終了位置を startBlock の末尾にする
+          const firstTextNode = getFirstTextNode(currentBlock);
+          if (firstTextNode) {
+            startContainer = firstTextNode;
+            startOffset = 0;
+          } else {
+            startContainer = currentBlock;
+            startOffset = 0;
+          }
+
+          const lastTextNode = getLastTextNode(startBlock);
+          if (lastTextNode) {
+            endContainer = lastTextNode;
+            endOffset = lastTextNode.textContent.length;
+          } else {
+            endContainer = startBlock;
+            endOffset = startBlock.childNodes.length;
+          }
+        }
+      }
+
+      if (startBlock === currentBlock) {
+        if (compare <= 0) {
+          newRange.setStart(startRange.startContainer, startRange.startOffset);
+          newRange.setEnd(currentRange.startContainer, currentRange.startOffset);
+        } else {
+          newRange.setStart(currentRange.startContainer, currentRange.startOffset);
+          newRange.setEnd(startRange.startContainer, startRange.startOffset);
+        }
       } else {
-        newRange.setStart(currentRange.startContainer, currentRange.startOffset);
-        newRange.setEnd(startRange.startContainer, startRange.startOffset);
+        newRange.setStart(startContainer, startOffset);
+        newRange.setEnd(endContainer, endOffset);
       }
 
       sel.addRange(newRange);
@@ -2486,6 +2579,104 @@ function setupDragSelection() {
   });
 }
 
+
+// 複数行テキストの貼り付け時に改行ごとにブロックを分割して1行ずつ展開する処理
+function handleBlockPaste(e, activeBlock, contentDiv) {
+  const clipboardText = e.clipboardData.getData('text/plain');
+  if (!clipboardText) return;
+
+  // 改行が含まれていない場合はブラウザ標準の貼り付けに任せる
+  if (!clipboardText.includes('\n') && !clipboardText.includes('\r')) {
+    return;
+  }
+
+  e.preventDefault();
+  pushHistory();
+
+  const lines = clipboardText.split(/\r?\n/).filter(line => line !== null);
+  if (lines.length === 0) return;
+
+  const note = getActiveNote();
+  if (!note) return;
+
+  const found = findBlockAndParent(note.blocks, activeBlock.id);
+  if (!found) return;
+
+  // 現在のカーソル位置でテキストを分割
+  const selection = window.getSelection();
+  let prefix = '';
+  let suffix = '';
+
+  if (selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0);
+    const offset = getCaretCharacterOffsetWithin(contentDiv);
+    const fullText = serializeHtmlToWikiText(contentDiv);
+
+    prefix = fullText.substring(0, offset);
+    suffix = fullText.substring(offset);
+  } else {
+    prefix = activeBlock.content;
+    suffix = '';
+  }
+
+  // 1行目の処理：現在のブロックのカーソルの前に1行目のテキストを挿入
+  activeBlock.content = prefix + lines[0];
+
+  // 2行目以降の新規ブロックの作成と挿入
+  const newBlocks = [];
+  for (let i = 1; i < lines.length; i++) {
+    // 見出しやデータベースは段落(p)にフォールバック、その他は元のタイプを継承
+    const newType = (activeBlock.type === 'h1' || activeBlock.type === 'h2' || activeBlock.type === 'database') ? 'p' : activeBlock.type;
+    const blockContent = lines[i];
+
+    const newB = { id: generateId(), type: newType, content: blockContent };
+    if (newType === 'todo') newB.properties = { checked: false };
+    if (newType === 'toggle') newB.properties = { open: true, children: [] };
+    if (newType === 'callout') newB.properties = { emoji: '💡' };
+
+    newBlocks.push(newB);
+  }
+
+  // 最後の行の末尾に、元のブロックの「カーソルより後ろ」のテキストを結合
+  if (newBlocks.length > 0) {
+    newBlocks[newBlocks.length - 1].content += suffix;
+  } else {
+    activeBlock.content += suffix;
+  }
+
+  // 親の配列に新しいブロックを挿入
+  found.parentArray.splice(found.index + 1, 0, ...newBlocks);
+
+  saveNotesToStorage();
+  renderEditor();
+
+  // 貼り付け完了後、最後の行が貼り付けられたブロックの末尾にカーソルを移動
+  const targetBlockId = newBlocks.length > 0 ? newBlocks[newBlocks.length - 1].id : activeBlock.id;
+  const targetContent = newBlocks.length > 0 ? lines[lines.length - 1] : lines[0];
+  const focusOffset = (newBlocks.length > 0 ? targetContent.length : (prefix.length + targetContent.length));
+
+  setTimeout(() => {
+    const el = document.querySelector(`.block-content[data-id="${targetBlockId}"]`);
+    if (el) {
+      el.focus();
+      try {
+        const range = document.createRange();
+        const sel = window.getSelection();
+        const startPos = findDOMPosition(el, focusOffset);
+        if (startPos) {
+          range.setStart(startPos.node, startPos.offset);
+        } else {
+          range.selectNodeContents(el);
+          range.collapse(false);
+        }
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (e) {
+        console.error("Failed to set cursor after paste:", e);
+      }
+    }
+  }, 50);
+}
 
 function setupBlockCopyPasteShortcuts() {
   window.addEventListener('keydown', (e) => {
@@ -8659,6 +8850,31 @@ function showColorPalettePopover(e, onColorSelected) {
       }
 
       updateHistoryButtons();
+
+      // ドラッグ中にホイール操作でスクロールできるようにする
+      window.addEventListener('wheel', (e) => {
+        if (state.draggedBlockId || state.draggedSidebarId) {
+          const editorArea = document.querySelector('.editor-area');
+          if (editorArea) {
+            editorArea.scrollTop += e.deltaY;
+          }
+        }
+      }, { passive: true });
+
+      // バックスペースでのブラウザバックを防止
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace') {
+          const active = document.activeElement;
+          const isEditable = active && (
+            active.tagName === 'INPUT' ||
+            active.tagName === 'TEXTAREA' ||
+            active.contentEditable === 'true'
+          );
+          if (!isEditable) {
+            e.preventDefault();
+          }
+        }
+      });
 
       // Global keydown listener for Undo / Redo
       window.addEventListener('keydown', (e) => {

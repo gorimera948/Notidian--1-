@@ -985,6 +985,7 @@ select:focus {
   width: 100%;
   margin: 6px 0;
   position: relative;
+  padding-right: 24px; /* カラムの一番右側に美しい余白を確保 */
 }
 
 .column-block {
@@ -1003,6 +1004,18 @@ select:focus {
 .column-block:hover {
   border-color: rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.02);
+}
+
+/* カラム内の行のブロックコントロールは、ホバー時またはフォーカス時、選択時のみ表示するように厳格化 */
+.column-block .block-wrapper .block-controls {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.column-block .block-wrapper:hover .block-controls,
+.column-block .block-wrapper.selected .block-controls,
+.column-block .block-wrapper:focus-within .block-controls {
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 
 .column-resizer {
