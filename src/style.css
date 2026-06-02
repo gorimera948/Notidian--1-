@@ -985,7 +985,9 @@ select:focus {
   width: 100%;
   margin: 6px 0;
   position: relative;
-  padding-right: 24px; /* カラムの一番右側に美しい余白を確保 */
+  box-sizing: border-box;
+  padding-right: 76px;
+  /* 右端のはみ出しを防ぎ、左側の68pxパディングと対称の美しいプレミアムな右余白を確保 */
 }
 
 .column-block {
@@ -1006,12 +1008,12 @@ select:focus {
   background: rgba(255, 255, 255, 0.02);
 }
 
-/* カラム内の行のブロックコントロールは、ホバー時またはフォーカス時、選択時のみ表示するように厳格化 */
+/* カラム内の行のブロックコントロールは、選択時またはフォーカス時のみ表示するように厳格化（ホバー時は表示しないことで、カラム内での視覚的ノイズを劇的に排除） */
 .column-block .block-wrapper .block-controls {
   opacity: 0 !important;
   pointer-events: none !important;
 }
-.column-block .block-wrapper:hover .block-controls,
+
 .column-block .block-wrapper.selected .block-controls,
 .column-block .block-wrapper:focus-within .block-controls {
   opacity: 1 !important;
@@ -3291,6 +3293,34 @@ svg#cumulative-chart {
 .btn-fav-star.active {
   opacity: 1 !important;
   color: #ffb800 !important;
+}
+
+/* Sidebar Notes List Template Icons */
+.btn-template-star {
+  background: none;
+  border: none;
+  color: var(--text-muted, #6b7280);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 11px;
+  opacity: 0;
+  margin-right: 4px;
+  transition: all 0.15s ease;
+}
+
+.note-item:hover .btn-template-star {
+  opacity: 0.7;
+}
+
+.btn-template-star:hover {
+  color: var(--accent-secondary, #ec4899) !important;
+  transform: scale(1.2);
+  opacity: 1 !important;
+}
+
+.btn-template-star.active {
+  opacity: 1 !important;
+  color: var(--accent-secondary, #ec4899) !important;
 }
 
 /* Starred Folder / Favorites Accordion Styling */

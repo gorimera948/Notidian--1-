@@ -15,7 +15,7 @@
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="./src/style.css">
 </head>
 
 <body>
@@ -445,6 +445,9 @@
       <span id="block-bulk-select-count">0</span> 件のブロック選択中
     </div>
     <div class="bulk-actions">
+      <button id="btn-block-bulk-duplicate" class="btn-bulk-action" style="background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(139, 92, 246, 0.4); color: var(--text-primary); margin-right: 6px;">
+        <i class="fa-regular fa-clipboard"></i> 一括複製
+      </button>
       <button id="btn-block-bulk-delete" class="btn-bulk-action btn-bulk-danger">
         <i class="fa-solid fa-trash-can"></i> 一括削除
       </button>
@@ -457,7 +460,7 @@
   <!-- Tag Autocomplete Candidates Datalist -->
   <datalist id="existing-tags-datalist"></datalist>
 
-  <script src="app.js"></script>
+  <script type="module" src="./src/app.js"></script>
 </body>
 
 </html>
