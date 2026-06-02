@@ -275,6 +275,9 @@ export function createBlockDOM(block, parentBlock = null) {
   blockWrapper.setAttribute('data-id', block.id);
 
   blockWrapper.addEventListener('click', (e) => {
+    const isDatabase = e.target.closest('.database-container');
+    if (isDatabase) return;
+
     const isCheckbox = e.target.closest('.block-select-check');
     const isInput = e.target.closest('input:not(.block-select-check), button, select');
 
@@ -1818,11 +1821,28 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
   } else {
     const selection = window.getSelection();
     if (selection.rangeCount > 0) {
-      const offset = getCaretCharacterOffsetWithin(contentDiv);
-      const fullText = serializeHtmlToWikiText(contentDiv);
+      const range = selection.getRangeAt(0);
 
-      prefix = fullText.substring(0, offset);
-      suffix = fullText.substring(offset);
+      // prefixの取得（選択範囲の開始位置まで）
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(contentDiv);
+      preCaretRange.setEnd(range.startContainer, range.startOffset);
+      const fragmentStart = preCaretRange.cloneContents();
+      const tempDivStart = document.createElement('div');
+      tempDivStart.appendChild(fragmentStart);
+      prefix = serializeHtmlToWikiText(tempDivStart);
+
+      // suffixの取得（選択範囲の終了位置から後ろ）
+      const preCaretRangeEnd = range.cloneRange();
+      preCaretRangeEnd.selectNodeContents(contentDiv);
+      preCaretRangeEnd.setEnd(range.endContainer, range.endOffset);
+      const fragmentEnd = preCaretRangeEnd.cloneContents();
+      const tempDivEnd = document.createElement('div');
+      tempDivEnd.appendChild(fragmentEnd);
+      const endText = serializeHtmlToWikiText(tempDivEnd);
+
+      const fullText = serializeHtmlToWikiText(contentDiv);
+      suffix = fullText.substring(endText.length);
     } else {
       prefix = activeBlock.content;
       suffix = '';
@@ -1872,7 +1892,7 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
       try {
         const range = document.createRange();
         const sel = window.getSelection();
-        const startPos = findDOMPosition(el, focusOffset);
+        const startPos = findDOMPositionByWikiOffset(el, focusOffset);
         if (startPos) {
           range.setStart(startPos.node, startPos.offset);
         } else {
@@ -2324,6 +2344,43 @@ function getCaretCharacterOffsetWithin(element) {
     caretOffset = preCaretRange.toString().length;
   }
   return caretOffset;
+}
+
+function findDOMPositionByWikiOffset(container, wikiOffset) {
+  let currentWikiLength = 0;
+
+  function traverse(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = node.length;
+      if (currentWikiLength + len >= wikiOffset) {
+        return { node: node, offset: wikiOffset - currentWikiLength };
+      }
+      currentWikiLength += len;
+    } else if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('wiki-link')) {
+      const target = node.getAttribute('data-target') || node.textContent;
+      const isJp = node.getAttribute('data-bracket') === 'jp';
+      const openLen = 2; // 「「 または [[
+      const closeLen = 2; // 」」 または ]]
+      const totalWikiLen = openLen + target.length + closeLen;
+
+      if (currentWikiLength + totalWikiLen >= wikiOffset) {
+        if (wikiOffset - currentWikiLength < totalWikiLen / 2) {
+          return { node: node.parentNode, offset: Array.from(node.parentNode.childNodes).indexOf(node) };
+        } else {
+          return { node: node.parentNode, offset: Array.from(node.parentNode.childNodes).indexOf(node) + 1 };
+        }
+      }
+      currentWikiLength += totalWikiLen;
+    } else {
+      for (let i = 0; i < node.childNodes.length; i++) {
+        const res = traverse(node.childNodes[i]);
+        if (res) return res;
+      }
+    }
+    return null;
+  }
+
+  return traverse(container);
 }
 
 function getCharacterOffsetWithin(element, node, offset) {

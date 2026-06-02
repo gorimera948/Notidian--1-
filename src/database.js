@@ -1051,34 +1051,16 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     const tr = document.createElement('tr');
     tr.className = 'db-data-row';
 
-    tr.addEventListener('mousedown', (e) => {
-      if (e.shiftKey) {
-        e.preventDefault(); // Shiftクリック時のブラウザ標準のテキストハイライトを抑制
-      }
-    });
-
     tr.addEventListener('click', (e) => {
-      // 編集可能要素などを除外するが、Shiftキーが押されている場合は最優先で行選択を行う
+      // 編集可能要素などをクリックして編集に入る際、選択状態があればリセットする
       const isEditTarget = e.target.closest('.db-cell-edit, input, button, select, .db-select-badge, .db-date-span');
-      if (isEditTarget && !e.shiftKey) {
-        // 通常のセルクリックで編集に入る際、選択状態があればリセットする
+      if (isEditTarget) {
         if ((tableSelection.selectedRows && tableSelection.selectedRows.length > 0) || (state.selectedBlockIds && state.selectedBlockIds.length > 0)) {
           clearTableSelection();
           clearBlockSelection();
         }
         return;
       }
-
-      // Shiftキーが押されている場合は、入力フォーカスや標準動作を抑制する
-      if (e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-
-      const checked = !rowCheck.checked;
-      rowCheck.checked = checked;
-
-      handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, rowCheck);
     });
     // 削除・一括選択コントロールtd（極小コンパクト化）
     const controlTd = document.createElement('td');
@@ -1098,38 +1080,6 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     rowCheck.addEventListener('click', (e) => {
       e.stopPropagation();
       handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, rowCheck);
-    });
-
-    // mousedownでドラッグ選択を開始
-    rowCheck.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      isRowDragSelecting = true;
-      // 反転後の新しいチェック状態を記憶
-      rowDragSelectState = !rowCheck.checked;
-
-      // クリックとしての処理も即時実行
-      handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, rowCheck);
-    });
-
-    // mouseenterでなぞった行の状態を同期
-    rowCheck.addEventListener('mouseenter', () => {
-      if (isRowDragSelecting) {
-        if (tableSelection.blockId !== block.id) {
-          tableSelection.blockId = block.id;
-          tableSelection.selectedRows = [];
-        }
-
-        if (rowDragSelectState) {
-          if (!tableSelection.selectedRows.includes(row)) {
-            tableSelection.selectedRows.push(row);
-          }
-        } else {
-          tableSelection.selectedRows = tableSelection.selectedRows.filter(r => r !== row);
-        }
-
-        rowCheck.checked = rowDragSelectState;
-        updateBulkActionBar(block, rowDataList);
-      }
     });
 
     controlsWrapper.appendChild(rowCheck);
@@ -3977,6 +3927,7 @@ function updateBulkActionBar(block, rowDataList = null) {
   }
 
   countSpan.textContent = count;
+  bar.style.display = 'flex';
   container.innerHTML = '';
 
   // --- 1. 一括削除 ---
@@ -3993,25 +3944,23 @@ function updateBulkActionBar(block, rowDataList = null) {
   });
   container.appendChild(delBtn);
 
-  // --- 1.5 一括複製挿入（コピペ） ---
+  // --- 2. 複製挿入 ---
   const cloneBtn = document.createElement('button');
   cloneBtn.className = 'btn-bulk-action';
-  cloneBtn.style.background = 'rgba(139, 92, 246, 0.18)'; // 落ち着いた半透明の紫色
-  cloneBtn.style.border = '1px solid rgba(139, 92, 246, 0.4)'; // 上品なガラス枠
+  cloneBtn.style.background = 'rgba(139, 92, 246, 0.18)';
+  cloneBtn.style.border = '1px solid rgba(139, 92, 246, 0.4)';
   cloneBtn.style.color = 'var(--text-primary)';
   cloneBtn.innerHTML = '<i class="fa-regular fa-clipboard"></i> 複製挿入';
   cloneBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     pushHistory();
 
-    // 選択された行の複製（一意の新規IDを再生成）
     const copiedRows = tableSelection.selectedRows.map(r => {
       const newRow = JSON.parse(JSON.stringify(r));
       newRow.id = 'row-' + generateId();
       return newRow;
     });
 
-    // 選択された行の中で、現在のblock.properties.rows内で最も後ろにあるインデックスを特定
     let maxIndex = -1;
     tableSelection.selectedRows.forEach(r => {
       const idx = block.properties.rows.indexOf(r);
@@ -4019,7 +3968,6 @@ function updateBulkActionBar(block, rowDataList = null) {
     });
 
     if (maxIndex !== -1) {
-      // 最も後ろにある行の直後に一括挿入！
       block.properties.rows.splice(maxIndex + 1, 0, ...copiedRows);
     } else {
       block.properties.rows.push(...copiedRows);
@@ -4030,255 +3978,6 @@ function updateBulkActionBar(block, rowDataList = null) {
     renderEditor();
   });
   container.appendChild(cloneBtn);
-
-  // --- 2. プロパティ動的一括変更 ---
-  const propChangeWrapper = document.createElement('div');
-  propChangeWrapper.className = 'bulk-prop-change-wrapper';
-  propChangeWrapper.style.display = 'flex';
-  propChangeWrapper.style.alignItems = 'center';
-  propChangeWrapper.style.gap = '6px';
-  propChangeWrapper.innerHTML = `<span style="font-size:11px; color:var(--text-secondary); font-weight:500;"><i class="fa-solid fa-pen-to-square"></i> 変更:</span>`;
-
-  const propSelect = document.createElement('select');
-  propSelect.className = 'bulk-action-select';
-
-  const defaultOpt = document.createElement('option');
-  defaultOpt.value = '';
-  defaultOpt.textContent = '列を選択...';
-  propSelect.appendChild(defaultOpt);
-
-  const columns = block.properties.columns || [];
-  columns.forEach(col => {
-    const o = document.createElement('option');
-    o.value = col.id;
-    o.textContent = col.name;
-    propSelect.appendChild(o);
-  });
-
-  const valueInputContainer = document.createElement('span');
-  valueInputContainer.className = 'bulk-prop-val-container';
-  valueInputContainer.style.display = 'flex';
-  valueInputContainer.style.alignItems = 'center';
-  valueInputContainer.style.gap = '6px';
-
-  propSelect.addEventListener('change', () => {
-    valueInputContainer.innerHTML = '';
-    const colId = propSelect.value;
-    if (!colId) return;
-
-    const col = columns.find(c => c.id === colId);
-    if (!col) return;
-
-    if (col.type === 'status') {
-      const select = document.createElement('select');
-      select.className = 'bulk-action-select';
-      const def = document.createElement('option');
-      def.value = '';
-      def.textContent = 'ステータスを選択...';
-      select.appendChild(def);
-
-      const opts = col.options || [];
-      opts.forEach(o => {
-        const opt = document.createElement('option');
-        opt.value = o.id;
-        opt.textContent = o.name;
-        select.appendChild(opt);
-      });
-
-      const newOpt = document.createElement('option');
-      newOpt.value = '__CREATE_NEW__';
-      newOpt.textContent = '+ 新規ステータス作成...';
-      newOpt.style.color = 'var(--accent-primary)';
-      newOpt.style.fontWeight = 'bold';
-      select.appendChild(newOpt);
-
-      select.addEventListener('change', () => {
-        const val = select.value;
-        if (!val) return;
-
-        if (val === '__CREATE_NEW__') {
-          const newName = prompt('新しく作成するステータス名を入力してください：');
-          if (!newName || !newName.trim()) {
-            select.value = '';
-            return;
-          }
-
-          const trimmedName = newName.trim();
-          let existing = opts.find(o => o.name === trimmedName);
-          let newId;
-          if (existing) {
-            newId = existing.id;
-          } else {
-            newId = 'opt-' + generateId();
-            const colors = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
-            const randomColor = colors[Math.floor(Math.random() * colors.length)];
-            if (!col.options) col.options = [];
-            col.options.push({ id: newId, name: trimmedName, color: randomColor });
-          }
-
-          applyBulkPropertyChange(block, colId, newId);
-        } else {
-          applyBulkPropertyChange(block, colId, val);
-        }
-      });
-      valueInputContainer.appendChild(select);
-    }
-    else if (col.type === 'select') {
-      const select = document.createElement('select');
-      select.className = 'bulk-action-select';
-      const def = document.createElement('option');
-      def.value = '';
-      def.textContent = 'タグを選択...';
-      select.appendChild(def);
-
-      const opts = col.options || [];
-      opts.forEach(o => {
-        const opt = document.createElement('option');
-        opt.value = o;
-        opt.textContent = o;
-        select.appendChild(opt);
-      });
-
-      const newOpt = document.createElement('option');
-      newOpt.value = '__CREATE_NEW__';
-      newOpt.textContent = '+ 新規タグ作成...';
-      newOpt.style.color = 'var(--accent-primary)';
-      newOpt.style.fontWeight = 'bold';
-      select.appendChild(newOpt);
-
-      select.addEventListener('change', () => {
-        const val = select.value;
-        if (!val) return;
-
-        if (val === '__CREATE_NEW__') {
-          const newName = prompt('新しく作成するタグ名を入力してください：');
-          if (!newName || !newName.trim()) {
-            select.value = '';
-            return;
-          }
-
-          const trimmedName = newName.trim();
-          if (!col.options) col.options = [];
-          if (!col.options.includes(trimmedName)) {
-            col.options.push(trimmedName);
-          }
-
-          applyBulkPropertyChange(block, colId, trimmedName);
-        } else {
-          applyBulkPropertyChange(block, colId, val);
-        }
-      });
-      valueInputContainer.appendChild(select);
-    }
-    else if (col.type === 'date') {
-      const input = document.createElement('input');
-      input.type = 'date';
-      input.className = 'bulk-action-date-input';
-
-      input.addEventListener('change', () => {
-        const val = input.value;
-        if (val) applyBulkPropertyChange(block, colId, val);
-      });
-      valueInputContainer.appendChild(input);
-    }
-    else if (col.type === 'checkbox') {
-      const select = document.createElement('select');
-      select.className = 'bulk-action-select';
-      select.innerHTML = `
-        <option value="">選択してください...</option>
-        <option value="true">ON (チェックあり)</option>
-        <option value="false">OFF (チェックなし)</option>
-      `;
-      select.addEventListener('change', () => {
-        const val = select.value;
-        if (val !== '') {
-          applyBulkPropertyChange(block, colId, val === 'true');
-        }
-      });
-      valueInputContainer.appendChild(select);
-    }
-    else if (col.type === 'number') {
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.className = 'bulk-action-date-input';
-      input.style.width = '70px';
-      input.placeholder = '数値';
-
-      const applyBtn = document.createElement('button');
-      applyBtn.className = 'btn-bulk-action';
-      applyBtn.textContent = '適用';
-      applyBtn.addEventListener('click', () => {
-        const val = parseFloat(input.value);
-        if (!isNaN(val)) {
-          applyBulkPropertyChange(block, colId, val);
-        }
-      });
-
-      valueInputContainer.appendChild(input);
-      valueInputContainer.appendChild(applyBtn);
-    }
-    else {
-      // text
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'bulk-action-date-input';
-      input.placeholder = 'テキストを入力';
-      input.style.width = '120px';
-
-      const applyBtn = document.createElement('button');
-      applyBtn.className = 'btn-bulk-action';
-      applyBtn.textContent = '驕ｩ逕ｨ';
-      applyBtn.addEventListener('click', () => {
-        const val = input.value.trim();
-        applyBulkPropertyChange(block, colId, val);
-      });
-
-      valueInputContainer.appendChild(input);
-      valueInputContainer.appendChild(applyBtn);
-    }
-  });
-
-  // デイリーフォルダー設定セクションの描画
-  const dailySection = document.createElement('div');
-  dailySection.className = 'daily-folder-popover-section';
-  dailySection.style.padding = '8px 10px';
-  dailySection.style.marginTop = '4px';
-  dailySection.style.borderTop = '1px solid var(--border-color, #e5e7eb)';
-
-  const dailyLabel = document.createElement('label');
-  dailyLabel.style = 'font-size: 10px; color: var(--text-muted); font-weight: 700; display: block; margin-bottom: 4px;';
-  dailyLabel.innerHTML = '<i class="fa-regular fa-folder"></i> デイリー自動格納フォルダ';
-  dailySection.appendChild(dailyLabel);
-
-  const selectEl = document.createElement('select');
-  selectEl.className = 'daily-folder-popover-select';
-  selectEl.style = 'width: 100%; padding: 4px; font-size: 11px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;';
-  selectEl.innerHTML = '<option value="">ルート階層 (フォルダなし)</option>';
-
-  const addFolderOptions = (foldersList, parentId, depth) => {
-    const currentFolders = foldersList.filter(f => f.parentId === parentId);
-    currentFolders.sort((a, b) => b.sortIndex - a.sortIndex);
-    currentFolders.forEach(folder => {
-      const opt = document.createElement('option');
-      opt.value = folder.id;
-      opt.textContent = '\u00A0\u00A0'.repeat(depth) + folder.name;
-      selectEl.appendChild(opt);
-      addFolderOptions(foldersList, folder.id, depth + 1);
-    });
-  };
-  addFolderOptions(state.folders, null, 0);
-
-  selectEl.value = state.dailyFolderId || '';
-
-  selectEl.addEventListener('change', (evt) => {
-    state.dailyFolderId = evt.target.value || null;
-    saveNotesToStorage();
-  });
-
-  dailySection.appendChild(selectEl);
-  popover.appendChild(dailySection);
-
-  document.body.appendChild(popover);
 }
 
 // ==========================================
