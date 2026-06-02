@@ -9,7 +9,7 @@ export function serializeHtmlToWikiText(element) {
   const clone = element.cloneNode(true);
   const links = clone.querySelectorAll('.wiki-link');
   links.forEach(link => {
-    const target = link.getAttribute('data-target') || link.textContent;
+    const target = link.textContent || link.getAttribute('data-target') || '';
     const isJp = link.getAttribute('data-bracket') === 'jp';
     const open = isJp ? '「「' : '[[';
     const close = isJp ? '」」' : ']]';
@@ -39,7 +39,7 @@ export function parseWikiLinks(htmlContent) {
     const isJp = match.startsWith('「「');
     const bracketAttr = isJp ? 'data-bracket="jp"' : 'data-bracket="en"';
 
-    return `<span class="${className}" data-target="${escapeHTML(trimmedTitle)}" ${bracketAttr} title="${tooltip}" contenteditable="false">${escapeHTML(noteTitle)}</span>`;
+    return `<span class="${className}" data-target="${escapeHTML(trimmedTitle)}" ${bracketAttr} title="${tooltip}">${escapeHTML(noteTitle)}</span>`;
   };
 
   parsed = parsed.replace(WIKI_LINK_REGEX, replaceLink);
@@ -338,4 +338,38 @@ function findDOMPosition(container, offset) {
     }
   }
   return null;
+}
+
+export function checkAndInsertPairBrackets(contentDiv) {
+  const selection = window.getSelection();
+  if (selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0);
+    const node = range.startContainer;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent;
+      const offset = range.startOffset;
+      const beforeText = text.substring(0, offset);
+
+      // 直前の2文字が「「または[[であるかチェック
+      const lastTwo = beforeText.substring(beforeText.length - 2);
+      if (lastTwo === '「「' || lastTwo === '[[') {
+        const isJp = lastTwo === '「「';
+        const closeBracket = isJp ? '」」' : ']]';
+
+        // カーソルの直後にすでに閉じカッコが存在するかどうかを確認（存在する場合は二重挿入しない）
+        const afterText = text.substring(offset);
+        if (!afterText.startsWith(closeBracket)) {
+          // 閉じカッコを挿入
+          node.textContent = beforeText + closeBracket + afterText;
+          
+          // カーソル位置を元の位置（カッコの間）に戻す
+          const newRange = document.createRange();
+          newRange.setStart(node, offset);
+          newRange.setEnd(node, offset);
+          selection.removeAllRanges();
+          selection.addRange(newRange);
+        }
+      }
+    }
+  }
 }

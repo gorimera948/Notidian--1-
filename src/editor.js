@@ -1,6 +1,6 @@
 import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
-import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu } from './wikilinks.js';
+import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
 import { createDatabaseDOM } from './database.js';
 
 function renderNoteList() {
@@ -850,10 +850,22 @@ function handleEditorKeydown(e, block, contentDiv) {
     const selection = window.getSelection();
     if (selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
-      const node = range.startContainer;
+      let node = range.startContainer;
+      let offset = range.startOffset;
+
+      // 要素ノードを指している場合は、実際の子テキストノードとオフセットに解決
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.childNodes.length > 0 && offset > 0) {
+          const targetChild = node.childNodes[offset - 1];
+          if (targetChild && targetChild.nodeType === Node.TEXT_NODE) {
+            node = targetChild;
+            offset = targetChild.length;
+          }
+        }
+      }
+
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent;
-        const offset = range.startOffset;
         const beforeText = text.substring(0, offset);
 
         const match = beforeText.match(/(?:「「|\[\[)([^「「\[\[\]\]」」]+)$/);
@@ -864,7 +876,7 @@ function handleEditorKeydown(e, block, contentDiv) {
           if (!trimmedKeyword) return;
 
           // トリガーされたカッコの種類を特定
-          const triggerType = beforeText.substring(offset - keyword.length - 2, offset - keyword.length);
+          const triggerType = beforeText.substring(beforeText.length - keyword.length - 2, beforeText.length - keyword.length);
           const isJp = triggerType === '「「';
           const closeBracket = isJp ? '」」' : ']]';
 
@@ -893,7 +905,6 @@ function handleEditorKeydown(e, block, contentDiv) {
           span.setAttribute('data-target', trimmedKeyword);
           span.setAttribute('data-bracket', isJp ? 'jp' : 'en');
           span.setAttribute('title', 'ノートを開く');
-          span.setAttribute('contenteditable', 'false');
           span.textContent = keyword;
 
           // カーソルの直後にすでに閉じカッコが存在するかどうかを確認（存在する場合は削除）
@@ -929,6 +940,7 @@ function handleEditorKeydown(e, block, contentDiv) {
     }
 
     e.preventDefault();
+    block.content = serializeHtmlToWikiText(contentDiv);
     const note = getActiveNote();
     const found = findBlockAndParent(note.blocks, block.id);
     if (!found) return;
@@ -1059,6 +1071,7 @@ function handleEditorKeydown(e, block, contentDiv) {
   // Nest blocks under toggles with Tab / Shift+Tab
   if (e.key === 'Tab') {
     e.preventDefault();
+    block.content = serializeHtmlToWikiText(contentDiv);
     const note = getActiveNote();
     if (!note) return;
 
@@ -2044,6 +2057,23 @@ function updateExistingTagsDatalist() {
   });
 }
 
+function getNoteTagStyles(tag) {
+  const colors = [
+    { bg: 'rgba(239, 68, 68, 0.12)', fg: '#fca5a5', border: 'rgba(239, 68, 68, 0.25)' },   // red
+    { bg: 'rgba(59, 130, 246, 0.12)', fg: '#93c5fd', border: 'rgba(59, 130, 246, 0.25)' },  // blue
+    { bg: 'rgba(16, 185, 129, 0.12)', fg: '#a7f3d0', border: 'rgba(16, 185, 129, 0.25)' },  // green
+    { bg: 'rgba(245, 158, 11, 0.12)', fg: '#fde68a', border: 'rgba(245, 158, 11, 0.25)' },   // yellow
+    { bg: 'rgba(139, 92, 246, 0.12)', fg: '#ddd6fe', border: 'rgba(139, 92, 246, 0.25)' },  // purple
+    { bg: 'rgba(236, 72, 153, 0.12)', fg: '#fbcfe8', border: 'rgba(236, 72, 153, 0.25)' },  // pink
+    { bg: 'rgba(148, 163, 184, 0.12)', fg: '#cbd5e1', border: 'rgba(148, 163, 184, 0.25)' }   // gray
+  ];
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
 function renderNoteTags() {
   const tagsPanel = document.getElementById('note-tags-panel');
   if (!tagsPanel) return;
@@ -2069,9 +2099,10 @@ function renderNoteTags() {
     chip.style.gap = '6px';
     chip.style.padding = '4px 10px';
     chip.style.borderRadius = '14px';
-    chip.style.background = 'var(--bg-secondary, #1f2937)';
-    chip.style.border = '1px solid var(--border-color, #374151)';
-    chip.style.color = 'var(--accent-secondary, #ec4899)';
+    const tagStyles = getNoteTagStyles(tag);
+    chip.style.background = tagStyles.bg;
+    chip.style.border = `1px solid ${tagStyles.border}`;
+    chip.style.color = tagStyles.fg;
     chip.style.fontSize = '12px';
     chip.style.fontWeight = '500';
 
@@ -2192,12 +2223,13 @@ function renderSidebarTags() {
     tagEl.className = 'sidebar-tag-chip';
 
     // プレミアムなタグチップスタイル
+    const tagStyles = getNoteTagStyles(tag);
     tagEl.style.fontSize = '11px';
     tagEl.style.padding = '3px 8px';
     tagEl.style.borderRadius = '12px';
-    tagEl.style.background = 'var(--bg-secondary, #1f2937)';
-    tagEl.style.border = '1px solid var(--border-color, #374151)';
-    tagEl.style.color = 'var(--text-secondary, #d1d5db)';
+    tagEl.style.background = tagStyles.bg;
+    tagEl.style.border = `1px solid ${tagStyles.border}`;
+    tagEl.style.color = tagStyles.fg;
     tagEl.style.cursor = 'pointer';
     tagEl.style.transition = 'all 0.2s';
     tagEl.style.display = 'inline-flex';
@@ -2647,6 +2679,79 @@ export function setupMultipleBlockSelectionShortcuts() {
     };
   }
 
+  function getMultipleBlockSelectionWikiText(selInfo) {
+    const { range, startEl, endEl } = selInfo;
+    const startId = startEl.getAttribute('data-id');
+    const endId = endEl.getAttribute('data-id');
+
+    const note = getActiveNote();
+    if (!note) return '';
+
+    const flatBlocks = getAllBlocksFlat(note.blocks);
+    const startIdx = flatBlocks.findIndex(b => b.id === startId);
+    const endIdx = flatBlocks.findIndex(b => b.id === endId);
+
+    if (startIdx === -1 || endIdx === -1) return '';
+
+    let firstEl = startEl;
+    let lastEl = endEl;
+    let firstIdx = startIdx;
+    let lastIdx = endIdx;
+    let firstRangeContainer = range.startContainer;
+    let firstRangeOffset = range.startOffset;
+    let lastRangeContainer = range.endContainer;
+    let lastRangeOffset = range.endOffset;
+
+    if (startIdx > endIdx) {
+      firstEl = endEl;
+      lastEl = startEl;
+      firstIdx = endIdx;
+      lastIdx = startIdx;
+      firstRangeContainer = range.endContainer;
+      firstRangeOffset = range.endOffset;
+      lastRangeContainer = range.startContainer;
+      lastRangeOffset = range.startOffset;
+    }
+
+    const copiedLines = [];
+    for (let i = firstIdx; i <= lastIdx; i++) {
+      const block = flatBlocks[i];
+      const blockEl = document.querySelector(`.block-content[data-id="${block.id}"]`);
+      if (!blockEl) continue;
+
+      if (i === firstIdx) {
+        const firstText = getWikiTextAfter(firstEl, firstRangeContainer, firstRangeOffset);
+        copiedLines.push(firstText);
+      } else if (i === lastIdx) {
+        const lastText = getWikiTextBefore(lastEl, lastRangeContainer, lastRangeOffset);
+        copiedLines.push(lastText);
+      } else {
+        copiedLines.push(serializeHtmlToWikiText(blockEl));
+      }
+    }
+
+    return copiedLines.join('\n');
+  }
+
+  function setCaretByWikiOffset(el, wikiOffset) {
+    try {
+      const range = document.createRange();
+      const sel = window.getSelection();
+      const startPos = findDOMPositionByWikiOffset(el, wikiOffset);
+      if (startPos) {
+        range.setStart(startPos.node, startPos.offset);
+      } else {
+        range.selectNodeContents(el);
+        range.collapse(false);
+      }
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (err) {
+      console.error("Failed to set caret by wiki offset:", err);
+      setCaretPosition(el, wikiOffset);
+    }
+  }
+
   window.addEventListener('keydown', (e) => {
     const selInfo = getMultipleBlockSelectionRange();
     if (!selInfo) return;
@@ -2662,7 +2767,7 @@ export function setupMultipleBlockSelectionShortcuts() {
           const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
           if (el) {
             focusBlock(el);
-            setCaretPosition(el, res.mergeOffset);
+            setCaretByWikiOffset(el, res.mergeOffset);
           }
         }, 50);
       }
@@ -2677,7 +2782,7 @@ export function setupMultipleBlockSelectionShortcuts() {
           const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
           if (el) {
             focusBlock(el);
-            setCaretPosition(el, res.mergeOffset);
+            setCaretByWikiOffset(el, res.mergeOffset);
           }
         }, 50);
       }
@@ -2700,7 +2805,7 @@ export function setupMultipleBlockSelectionShortcuts() {
             const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
             if (el) {
               focusBlock(el);
-              setCaretPosition(el, res.mergeOffset + 1);
+              setCaretByWikiOffset(el, res.mergeOffset + 1);
             }
           }, 50);
         }
@@ -2708,9 +2813,18 @@ export function setupMultipleBlockSelectionShortcuts() {
       return;
     }
 
+    if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === 'c') {
+      e.preventDefault();
+      const selectedText = getMultipleBlockSelectionWikiText(selInfo);
+      navigator.clipboard.writeText(selectedText).catch(err => {
+        console.error("Failed to copy multiple block selection: ", err);
+      });
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === 'x') {
       e.preventDefault();
-      const selectedText = selInfo.selection.toString();
+      const selectedText = getMultipleBlockSelectionWikiText(selInfo);
       navigator.clipboard.writeText(selectedText).then(() => {
         const res = deleteMultipleBlockSelection(selInfo);
         if (res) {
@@ -2718,7 +2832,7 @@ export function setupMultipleBlockSelectionShortcuts() {
             const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
             if (el) {
               focusBlock(el);
-              setCaretPosition(el, res.mergeOffset);
+              setCaretByWikiOffset(el, res.mergeOffset);
             }
           }, 50);
         }
@@ -2745,7 +2859,7 @@ export function setupMultipleBlockSelectionShortcuts() {
       if (!el) return;
 
       focusBlock(el);
-      setCaretPosition(el, res.mergeOffset);
+      setCaretByWikiOffset(el, res.mergeOffset);
 
       if (clipboardText.includes('\n') || clipboardText.includes('\r')) {
         const note = getActiveNote();
@@ -2766,7 +2880,7 @@ export function setupMultipleBlockSelectionShortcuts() {
             const newEl = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
             if (newEl) {
               focusBlock(newEl);
-              setCaretPosition(newEl, res.mergeOffset + clipboardText.length);
+              setCaretByWikiOffset(newEl, res.mergeOffset + clipboardText.length);
             }
           }, 50);
         }

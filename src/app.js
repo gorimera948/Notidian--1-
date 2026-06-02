@@ -173,6 +173,16 @@ function updateHistoryButtons() {
 document.addEventListener('mousedown', (e) => {
   const wikiLinkEl = e.target.closest('.wiki-link');
   if (wikiLinkEl) {
+    // 現在アクティブにフォーカスが当たって編集中の要素内にリンクがあるか確認する
+    const activeEditable = document.activeElement;
+    const isEditingThisBlock = activeEditable && 
+                               activeEditable.isContentEditable && 
+                               activeEditable.contains(wikiLinkEl);
+
+    if (isEditingThisBlock && !e.ctrlKey && !e.metaKey) {
+      // 通常クリックはエディタの編集挙動に任せるため、preventDefaultせずスルーする
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     const targetTitle = wikiLinkEl.getAttribute('data-target');
@@ -1314,6 +1324,23 @@ function renderNormalTree(normalNotes) {
 // ==========================================
 const sidebarTagsContainer = document.getElementById('sidebar-tags-list');
 
+function getNoteTagStyles(tag) {
+  const colors = [
+    { bg: 'rgba(239, 68, 68, 0.12)', fg: '#fca5a5', border: 'rgba(239, 68, 68, 0.25)' },   // red
+    { bg: 'rgba(59, 130, 246, 0.12)', fg: '#93c5fd', border: 'rgba(59, 130, 246, 0.25)' },  // blue
+    { bg: 'rgba(16, 185, 129, 0.12)', fg: '#a7f3d0', border: 'rgba(16, 185, 129, 0.25)' },  // green
+    { bg: 'rgba(245, 158, 11, 0.12)', fg: '#fde68a', border: 'rgba(245, 158, 11, 0.25)' },   // yellow
+    { bg: 'rgba(139, 92, 246, 0.12)', fg: '#ddd6fe', border: 'rgba(139, 92, 246, 0.25)' },  // purple
+    { bg: 'rgba(236, 72, 153, 0.12)', fg: '#fbcfe8', border: 'rgba(236, 72, 153, 0.25)' },  // pink
+    { bg: 'rgba(148, 163, 184, 0.12)', fg: '#cbd5e1', border: 'rgba(148, 163, 184, 0.25)' }   // gray
+  ];
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
 export function renderSidebarTags() {
   if (!sidebarTagsContainer) return;
   sidebarTagsContainer.innerHTML = '';
@@ -1337,10 +1364,62 @@ export function renderSidebarTags() {
   sortedTags.forEach(([tag, count]) => {
     const el = document.createElement('div');
     el.className = 'sidebar-tag-item';
-    el.innerHTML = `<span class="tag-name"><i class="fa-solid fa-tag"></i> ${escapeHTML(tag)}</span><span class="tag-count">${count}</span>`;
+    
+    const currentSearch = searchInput ? searchInput.value.trim() : '';
+    const isActive = currentSearch === '#' + tag || currentSearch === '＃' + tag;
+    
+    const tagStyles = getNoteTagStyles(tag);
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.justifyContent = 'space-between';
+    el.style.padding = '5px 10px';
+    el.style.borderRadius = '8px';
+    el.style.margin = '4px 0';
+    el.style.cursor = 'pointer';
+    el.style.transition = 'all 0.2s';
+    
+    if (isActive) {
+      el.style.background = tagStyles.bg;
+      el.style.border = `1px solid ${tagStyles.border}`;
+      el.style.boxShadow = `0 0 6px ${tagStyles.border}`;
+    } else {
+      el.style.background = 'transparent';
+      el.style.border = '1px solid transparent';
+    }
+
+    el.innerHTML = `
+      <span class="tag-name" style="color: ${tagStyles.fg}; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+        <i class="fa-solid fa-tag"></i> ${escapeHTML(tag)}
+      </span>
+      <span class="tag-count" style="font-size: 10px; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 10px; color: var(--text-muted); font-weight: 600;">
+        ${count}
+      </span>
+    `;
+
+    el.addEventListener('mouseenter', () => {
+      if (!isActive) {
+        el.style.background = 'rgba(255,255,255,0.03)';
+        el.style.borderColor = 'var(--border-light)';
+      }
+    });
+    el.addEventListener('mouseleave', () => {
+      if (!isActive) {
+        el.style.background = 'transparent';
+        el.style.borderColor = 'transparent';
+      }
+    });
+
     el.addEventListener('click', () => {
       if (searchInput) {
-        searchInput.value = tag;
+        if (searchInput.value === '#' + tag) {
+          searchInput.value = '';
+          const clearBtn = document.getElementById('clear-search-btn');
+          if (clearBtn) clearBtn.style.display = 'none';
+        } else {
+          searchInput.value = '#' + tag;
+          const clearBtn = document.getElementById('clear-search-btn');
+          if (clearBtn) clearBtn.style.display = 'block';
+        }
         renderNoteList();
       }
     });
@@ -1392,9 +1471,10 @@ export function renderNoteTags() {
     chip.style.gap = '6px';
     chip.style.padding = '4px 10px';
     chip.style.borderRadius = '14px';
-    chip.style.background = 'var(--bg-secondary, #1f2937)';
-    chip.style.border = '1px solid var(--border-color, #374151)';
-    chip.style.color = 'var(--accent-secondary, #ec4899)';
+    const tagStyles = getNoteTagStyles(tag);
+    chip.style.background = tagStyles.bg;
+    chip.style.border = `1px solid ${tagStyles.border}`;
+    chip.style.color = tagStyles.fg;
     chip.style.fontSize = '12px';
     chip.style.fontWeight = '500';
 

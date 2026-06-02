@@ -1,6 +1,6 @@
 import { state, getActiveNote, saveNotesToStorage, getActiveNormalNotes, pushHistory } from './state.js';
 import { generateId, escapeHTML, showToast, formatMS, getFormattedTime, getFormattedTimeFromMs } from './utils.js';
-import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger } from './wikilinks.js';
+import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu } from './wikilinks.js';
 
 function renderEditor() {
   if (window.Notidian && typeof window.Notidian.renderEditor === 'function') {
@@ -1114,6 +1114,13 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
       td.style.maxWidth = `${col.width}px`;
 
       if (col.type === 'status') {
+        if (!col.options || col.options.length === 0) {
+          col.options = [
+            { id: 'opt-todo', name: '未着手', color: 'gray' },
+            { id: 'opt-progress', name: '進行中', color: 'blue' },
+            { id: 'opt-complete', name: '完了', color: 'green' }
+          ];
+        }
         const badge = document.createElement('span');
         const optName = getStatusOptionName(col, val) || '未着手';
         const optColor = getStatusOptionColor(col, val) || 'gray';
@@ -1195,10 +1202,15 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
             cellDiv.textContent = val;
           }
 
-          // フォーカスON時はプレーンな括弧付きテキストに
+          // フォーカスON時もHTML表示を維持（WikiLinkバッジを表示したまま編集）
           cellDiv.addEventListener('focus', () => {
             state.lastActiveEditTarget = cellDiv;
-            cellDiv.textContent = row[col.id] !== undefined ? row[col.id] : '';
+            const val = row[col.id] !== undefined ? row[col.id] : '';
+            if (col.type === 'text' || !col.type) {
+              cellDiv.innerHTML = parseWikiLinks(escapeHTML(val));
+            } else {
+              cellDiv.textContent = val;
+            }
           });
         }
 
@@ -1206,15 +1218,16 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
           // すでにDOMから取り除かれている古い要素なら、非同期の暴発によるデータ破壊を防ぐため無視する
           if (!document.body.contains(cellDiv)) return;
 
-          let newVal = cellDiv.textContent.trim();
-          if (col.type === 'number') {
-            const parsed = parseFloat(newVal);
-            newVal = isNaN(parsed) ? '' : parsed;
-            cellDiv.textContent = newVal !== '' ? formatNumberValue(newVal, col) : '';
+          let newVal;
+          if (col.type === 'text' || !col.type) {
+            newVal = serializeHtmlToWikiText(cellDiv).trim();
+            cellDiv.innerHTML = parseWikiLinks(escapeHTML(newVal));
           } else {
-            // フォーカスアウト時はWikiリンクをパースして再描画
-            if (col.type === 'text' || !col.type) {
-              cellDiv.innerHTML = parseWikiLinks(escapeHTML(newVal));
+            newVal = cellDiv.textContent.trim();
+            if (col.type === 'number') {
+              const parsed = parseFloat(newVal);
+              newVal = isNaN(parsed) ? '' : parsed;
+              cellDiv.textContent = newVal !== '' ? formatNumberValue(newVal, col) : '';
             } else {
               cellDiv.textContent = newVal;
             }
@@ -1225,7 +1238,11 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
         });
 
         cellDiv.addEventListener('input', (e) => {
-          row[col.id] = cellDiv.textContent;
+          if (col.type === 'text' || !col.type) {
+            row[col.id] = serializeHtmlToWikiText(cellDiv);
+          } else {
+            row[col.id] = cellDiv.textContent;
+          }
           handleWikiLinkTrigger(cellDiv, e);
         });
 
@@ -1261,74 +1278,90 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
             const selection = window.getSelection();
             if (selection.rangeCount > 0) {
               const range = selection.getRangeAt(0);
-              const node = range.startContainer;
+              let node = range.startContainer;
+              let offset = range.startOffset;
+
+              // 要素ノードを指している場合は、実際の子テキストノードとオフセットに解決
+              if (node.nodeType === Node.ELEMENT_NODE) {
+                if (node.childNodes.length > 0 && offset > 0) {
+                  const targetChild = node.childNodes[offset - 1];
+                  if (targetChild && targetChild.nodeType === Node.TEXT_NODE) {
+                    node = targetChild;
+                    offset = targetChild.length;
+                  }
+                }
+              }
+
               if (node.nodeType === Node.TEXT_NODE) {
                 const text = node.textContent;
-                const offset = range.startOffset;
                 const beforeText = text.substring(0, offset);
 
                 const match = beforeText.match(/(?:「「|\[\[)([^「「\[\[\]\]」」]+)$/);
                 if (match) {
                   evt.preventDefault();
                   const keyword = match[1];
+                  const trimmedKeyword = keyword.trim();
+                  if (!trimmedKeyword) return;
 
                   // トリガーされたカッコの種類を特定
-                  const triggerType = beforeText.substring(offset - keyword.length - 2, offset - keyword.length);
+                  const triggerType = beforeText.substring(beforeText.length - keyword.length - 2, beforeText.length - keyword.length);
                   const isJp = triggerType === '「「';
-                  const openBracket = isJp ? '「「' : '[[';
                   const closeBracket = isJp ? '」」' : ']]';
 
-                  // コピーされたカッコの重複防止
-                  const afterText = text.substring(offset);
-                  const hasCloseBracket = afterText.startsWith(closeBracket);
-                  const actualCloseBracket = hasCloseBracket ? '' : closeBracket;
-
-                  const newText = text.substring(0, offset - keyword.length - 2) + `${openBracket}${keyword}${actualCloseBracket}` + text.substring(offset);
-                  node.textContent = newText;
-
-                  const newOffset = offset - keyword.length - 2 + keyword.length + 4;
-                  const newRange = document.createRange();
-                  newRange.setStart(node, newOffset);
-                  newRange.setEnd(node, newOffset);
-                  selection.removeAllRanges();
-                  selection.addRange(newRange);
-
                   // 🌟 存在しないノートの場合、裏で自動的に新規ノートを作成！
-                  const trimmedKeyword = keyword.trim();
-                  if (trimmedKeyword) {
-                    let existingNote = state.notes.find(n => n.title.toLowerCase() === trimmedKeyword.toLowerCase());
-                    if (!existingNote) {
-                      const activeNote = getActiveNote();
-                      const parentFolderId = activeNote ? activeNote.folderId : null;
-                      existingNote = {
-                        id: 'note-' + generateId(),
-                        title: trimmedKeyword,
-                        folderId: parentFolderId,
-                        updatedAt: Date.now(),
-                        blocks: [
-                          { id: generateId(), type: 'p', content: '' }
-                        ]
-                      };
-                      state.notes.push(existingNote);
-                      saveNotesToStorage();
-                      renderNoteList();
-                    }
+                  let existingNote = state.notes.find(n => n.title.toLowerCase() === trimmedKeyword.toLowerCase());
+                  if (!existingNote) {
+                    const activeNote = getActiveNote();
+                    const parentFolderId = activeNote ? activeNote.folderId : null;
+                    existingNote = {
+                      id: 'note-' + generateId(),
+                      title: trimmedKeyword,
+                      folderId: parentFolderId,
+                      updatedAt: Date.now(),
+                      blocks: [
+                        { id: generateId(), type: 'p', content: '' }
+                      ]
+                    };
+                    state.notes.push(existingNote);
+                    saveNotesToStorage();
+                    renderNoteList();
                   }
 
-                  row[col.id] = cellDiv.textContent;
-                  saveNotesToStorage();
+                  // 🌟 その場で即座に青い WikiLink の HTML/DOM 要素を生成
+                  const span = document.createElement('span');
+                  span.className = existingNote ? 'wiki-link' : 'wiki-link wiki-link-new';
+                  span.setAttribute('data-target', trimmedKeyword);
+                  span.setAttribute('data-bracket', isJp ? 'jp' : 'en');
+                  span.setAttribute('title', 'ノートを開く');
+                  span.textContent = keyword;
 
-                  // 🌟 一時的にフォーカスアウト(blur)して WikiLink レンダリング（青色リンク）をリアルタイムで即時適用し、即座にフォーカスを戻す
-                  cellDiv.blur();
-                  setTimeout(() => {
-                    cellDiv.focus();
-                    const restoreRange = document.createRange();
-                    restoreRange.setStart(node, newOffset);
-                    restoreRange.setEnd(node, newOffset);
-                    const sel = window.getSelection();
-                    sel.removeAllRanges();
-                    sel.addRange(restoreRange);
-                  }, 10);
+                  // カーソルの直後にすでに閉じカッコが存在するかどうかを確認（存在する場合は削除）
+                  const afterText = text.substring(offset);
+                  if (afterText.startsWith(closeBracket)) {
+                    const caretRange = selection.getRangeAt(0);
+                    caretRange.setStart(node, offset);
+                    caretRange.setEnd(node, offset + 2);
+                    caretRange.deleteContents();
+                  }
+
+                  // 入力中の 「「キーワード の部分を削除して、代わりに作成した span を挿入！
+                  const caretRange = selection.getRangeAt(0);
+                  caretRange.setStart(node, offset - keyword.length - 2);
+                  caretRange.setEnd(node, offset);
+                  caretRange.deleteContents();
+
+                  caretRange.insertNode(span);
+
+                  // カーソルを挿入した span の直後にセット！
+                  selection.removeAllRanges();
+                  const newRange = document.createRange();
+                  newRange.setStartAfter(span);
+                  newRange.collapse(true);
+                  selection.addRange(newRange);
+
+                  // セルのデータをWikiText形式で更新
+                  row[col.id] = serializeHtmlToWikiText(cellDiv);
+                  saveNotesToStorage();
                   return;
                 }
               }
@@ -2557,7 +2590,7 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
         // 重複チェック
         let found = tagOptions.find(o => o.name === val || o.id === val);
         if (!found) {
-          found = { id: val, name: val, color: 'gray' };
+          found = { id: val, name: val, color: getTagHashColor(val) };
           tagOptions.push(found);
           col.options = tagOptions;
         }
@@ -6444,3 +6477,40 @@ function renderChartViewDOM(block, rowDataList) {
 }
 
 window.setupBlockBulkActionEvents = setupBlockBulkActionEvents;
+
+function findDOMPositionByWikiOffset(container, wikiOffset) {
+  let currentWikiLength = 0;
+
+  function traverse(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = node.length;
+      if (currentWikiLength + len >= wikiOffset) {
+        return { node: node, offset: wikiOffset - currentWikiLength };
+      }
+      currentWikiLength += len;
+    } else if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('wiki-link')) {
+      const target = node.getAttribute('data-target') || node.textContent;
+      const isJp = node.getAttribute('data-bracket') === 'jp';
+      const openLen = 2; // 「「 または [[
+      const closeLen = 2; // 」」 または ]]
+      const totalWikiLen = openLen + target.length + closeLen;
+
+      if (currentWikiLength + totalWikiLen >= wikiOffset) {
+        if (wikiOffset - currentWikiLength < totalWikiLen / 2) {
+          return { node: node.parentNode, offset: Array.from(node.parentNode.childNodes).indexOf(node) };
+        } else {
+          return { node: node.parentNode, offset: Array.from(node.parentNode.childNodes).indexOf(node) + 1 };
+        }
+      }
+      currentWikiLength += totalWikiLen;
+    } else {
+      for (let i = 0; i < node.childNodes.length; i++) {
+        const res = traverse(node.childNodes[i]);
+        if (res) return res;
+      }
+    }
+    return null;
+  }
+
+  return traverse(container);
+}
