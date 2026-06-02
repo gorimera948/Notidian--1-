@@ -702,6 +702,7 @@ function createEditableContent(block) {
   contentDiv.addEventListener('blur', () => {
     // すでにDOMから取り除かれている古い要素なら、非同期の暴発によるデータ破壊を防ぐため無視する
     if (!document.body.contains(contentDiv)) return;
+    if (state.isPasting) return;
 
     // Save content to state (using HTML-to-WikiText serializer)
     const textVal = serializeHtmlToWikiText(contentDiv);
@@ -1269,6 +1270,20 @@ function setupDragDropListeners() {
       }
     });
 
+    const content = wrapper.querySelector('.block-content');
+    if (content) {
+      content.addEventListener('mouseenter', () => {
+        if (!wrapper.classList.contains('dragging')) {
+          wrapper.removeAttribute('draggable');
+        }
+      });
+      content.addEventListener('mousedown', () => {
+        if (!wrapper.classList.contains('dragging')) {
+          wrapper.removeAttribute('draggable');
+        }
+      });
+    }
+
     wrapper.addEventListener('dragstart', (e) => {
       // ドラッグアイコン（.drag-handle）をドラッグしたときのみブロック移動を許可し、テキストのドラッグ選択からブロック移動が起きるのを防ぐ。
       const isDragHandle = e.target.closest('.drag-handle');
@@ -1823,6 +1838,8 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
   const found = findBlockAndParent(note.blocks, activeBlock.id);
   if (!found) return;
 
+  state.isPasting = true;
+
   // 現在のカーソル位置でテキストを分割
   let prefix = '';
   let suffix = '';
@@ -1845,7 +1862,7 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
       tempDivStart.appendChild(fragmentStart);
       prefix = serializeHtmlToWikiText(tempDivStart);
 
-      // suffixの取得（選択範囲の終了位置から後ろ）
+      // suffixの取得（選択範囲 of 終了位置から後ろ）
       const preCaretRangeEnd = range.cloneRange();
       preCaretRangeEnd.selectNodeContents(contentDiv);
       preCaretRangeEnd.setEnd(range.endContainer, range.endOffset);
@@ -1918,6 +1935,7 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
         console.error("Failed to set cursor after paste:", e);
       }
     }
+    state.isPasting = false;
   }, 50);
 }
 
@@ -2422,6 +2440,80 @@ function getCharacterOffsetWithin(element, node, offset) {
   return range.toString().length;
 }
 
+function getWikiOffsetWithin(element, targetNode, targetOffset) {
+  if (element === targetNode) {
+    let childLen = 0;
+    for (let i = 0; i < targetOffset; i++) {
+      const child = element.childNodes[i];
+      if (child) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          childLen += child.length;
+        } else if (child.nodeType === Node.ELEMENT_NODE && child.classList.contains('wiki-link')) {
+          const target = child.getAttribute('data-target') || child.textContent;
+          childLen += 4 + target.length;
+        } else {
+          childLen += child.textContent.length;
+        }
+      }
+    }
+    return childLen;
+  }
+  
+  let currentWikiLength = 0;
+  let found = false;
+
+  function traverse(node) {
+    if (found) return;
+
+    if (node === targetNode) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        currentWikiLength += targetOffset;
+      } else {
+        let childLen = 0;
+        for (let i = 0; i < targetOffset; i++) {
+          const child = node.childNodes[i];
+          if (child) {
+            if (child.nodeType === Node.TEXT_NODE) {
+              childLen += child.length;
+            } else if (child.nodeType === Node.ELEMENT_NODE && child.classList.contains('wiki-link')) {
+              const target = child.getAttribute('data-target') || child.textContent;
+              childLen += 4 + target.length;
+            } else {
+              childLen += child.textContent.length;
+            }
+          }
+        }
+        currentWikiLength += childLen;
+      }
+      found = true;
+      return;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      currentWikiLength += node.length;
+    } else if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('wiki-link')) {
+      if (node.contains(targetNode)) {
+        currentWikiLength += 2; // 「「 または [[ の2文字分
+        for (let i = 0; i < node.childNodes.length; i++) {
+          traverse(node.childNodes[i]);
+          if (found) return;
+        }
+      } else {
+        const target = node.getAttribute('data-target') || node.textContent;
+        currentWikiLength += 4 + target.length; // 「「 と 」」
+      }
+    } else {
+      for (let i = 0; i < node.childNodes.length; i++) {
+        traverse(node.childNodes[i]);
+        if (found) return;
+      }
+    }
+  }
+
+  traverse(element);
+  return found ? currentWikiLength : null;
+}
+
 function setCaretPosition(element, offset) {
   const range = document.createRange();
   const sel = window.getSelection();
@@ -2532,69 +2624,22 @@ export function setupMultipleBlockSelectionShortcuts() {
     return false;
   }
 
-  function findNodeInClone(origParent, origNode, cloneParent) {
-    if (origParent === origNode) return cloneParent;
-    
-    const path = [];
-    let temp = origNode;
-    while (temp && temp !== origParent) {
-      const parent = temp.parentNode;
-      if (!parent) return null;
-      const index = Array.from(parent.childNodes).indexOf(temp);
-      path.unshift(index);
-      temp = parent;
+  function getWikiTextBefore(element, node, offset, fallbackText = null) {
+    const fullText = serializeHtmlToWikiText(element);
+    const wikiOffset = getWikiOffsetWithin(element, node, offset);
+    if (wikiOffset === null || wikiOffset === undefined) {
+      return fallbackText !== null ? fallbackText : fullText;
     }
-    
-    let current = cloneParent;
-    for (let i = 0; i < path.length; i++) {
-      if (!current.childNodes || current.childNodes.length <= path[i]) {
-        return null;
-      }
-      current = current.childNodes[path[i]];
-    }
-    return current;
+    return fullText.substring(0, wikiOffset);
   }
 
-  function getWikiTextBefore(element, node, offset) {
-    const clone = element.cloneNode(true);
-    const targetNode = findNodeInClone(element, node, clone);
-    if (!targetNode) {
-      return serializeHtmlToWikiText(element);
+  function getWikiTextAfter(element, node, offset, fallbackText = '') {
+    const fullText = serializeHtmlToWikiText(element);
+    const wikiOffset = getWikiOffsetWithin(element, node, offset);
+    if (wikiOffset === null || wikiOffset === undefined) {
+      return fallbackText;
     }
-    
-    try {
-      const range = document.createRange();
-      const safeOffset = Math.min(offset, targetNode.nodeType === Node.TEXT_NODE ? targetNode.length : targetNode.childNodes.length);
-      range.setStart(targetNode, safeOffset);
-      range.setEndAfter(clone.lastChild || clone);
-      range.deleteContents();
-    } catch (e) {
-      console.error("Failed to delete contents in clone before:", e);
-      const textOffset = getCharacterOffsetWithin(element, node, offset);
-      return serializeHtmlToWikiText(element).substring(0, textOffset);
-    }
-    return serializeHtmlToWikiText(clone);
-  }
-
-  function getWikiTextAfter(element, node, offset) {
-    const clone = element.cloneNode(true);
-    const targetNode = findNodeInClone(element, node, clone);
-    if (!targetNode) {
-      return '';
-    }
-    
-    try {
-      const range = document.createRange();
-      range.setStartBefore(clone.firstChild || clone);
-      const safeOffset = Math.min(offset, targetNode.nodeType === Node.TEXT_NODE ? targetNode.length : targetNode.childNodes.length);
-      range.setEnd(targetNode, safeOffset);
-      range.deleteContents();
-    } catch (e) {
-      console.error("Failed to delete contents in clone after:", e);
-      const textOffset = getCharacterOffsetWithin(element, node, offset);
-      return serializeHtmlToWikiText(element).substring(textOffset);
-    }
-    return serializeHtmlToWikiText(clone);
+    return fullText.substring(wikiOffset);
   }
 
   function getMultipleBlockSelectionRange() {
@@ -2653,8 +2698,8 @@ export function setupMultipleBlockSelectionShortcuts() {
     const firstBlock = flatBlocks[firstIdx];
     const lastBlock = flatBlocks[lastIdx];
 
-    const firstText = getWikiTextBefore(firstEl, firstRangeContainer, firstRangeOffset);
-    const lastText = getWikiTextAfter(lastEl, lastRangeContainer, lastRangeOffset);
+    const firstText = getWikiTextBefore(firstEl, firstRangeContainer, firstRangeOffset, '');
+    const lastText = getWikiTextAfter(lastEl, lastRangeContainer, lastRangeOffset, '');
 
     pushHistory();
     firstBlock.content = firstText + lastText;
@@ -2720,10 +2765,10 @@ export function setupMultipleBlockSelectionShortcuts() {
       if (!blockEl) continue;
 
       if (i === firstIdx) {
-        const firstText = getWikiTextAfter(firstEl, firstRangeContainer, firstRangeOffset);
+        const firstText = getWikiTextAfter(firstEl, firstRangeContainer, firstRangeOffset, serializeHtmlToWikiText(firstEl));
         copiedLines.push(firstText);
       } else if (i === lastIdx) {
-        const lastText = getWikiTextBefore(lastEl, lastRangeContainer, lastRangeOffset);
+        const lastText = getWikiTextBefore(lastEl, lastRangeContainer, lastRangeOffset, serializeHtmlToWikiText(lastEl));
         copiedLines.push(lastText);
       } else {
         copiedLines.push(serializeHtmlToWikiText(blockEl));
