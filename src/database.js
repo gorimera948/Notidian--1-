@@ -583,7 +583,40 @@ export function createDatabaseDOM(block) {
   });
   toolbar.appendChild(groupBtn);
 
-  // データベースを削除ボタン
+  // CSV export button
+  const exportCsvBtn = document.createElement('button');
+  exportCsvBtn.className = 'btn-db-toolbar';
+  exportCsvBtn.innerHTML = '<i class="fa-solid fa-file-export"></i> CSVエクスポート';
+  exportCsvBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    exportToCSV(block);
+  });
+  toolbar.appendChild(exportCsvBtn);
+
+  // CSV import button
+  const importCsvBtn = document.createElement('button');
+  importCsvBtn.className = 'btn-db-toolbar';
+  importCsvBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> CSVインポート';
+
+  const csvFileInput = document.createElement('input');
+  csvFileInput.type = 'file';
+  csvFileInput.accept = '.csv';
+  csvFileInput.style.display = 'none';
+  csvFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      importFromCSV(block, file);
+    }
+  });
+
+  importCsvBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    csvFileInput.click();
+  });
+  toolbar.appendChild(importCsvBtn);
+  toolbar.appendChild(csvFileInput);
+
+  // delete database button
   const deleteDbBtn = document.createElement('button');
   deleteDbBtn.className = 'btn-db-toolbar btn-db-delete';
   deleteDbBtn.style.color = '#f87171';
@@ -1824,32 +1857,100 @@ function showFilterConfigPopover(e, block, view) {
 
           valContainer.appendChild(select);
         } else if (col.type === 'select') {
-          // セレクトタグのドロップダウン
-          const select = document.createElement('select');
-          select.className = 'db-filter-val-select';
-          select.style.width = '100%';
+          // 検索機能付きのカスタムドロップダウン
+          const searchWrapper = document.createElement('div');
+          searchWrapper.style.position = 'relative';
+          searchWrapper.style.width = '100%';
+
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'db-filter-val-input'; // フィルター用のテキストインプットと同じスタイル
+          input.style.width = '100%';
+          input.placeholder = 'タグを検索...';
 
           const tagOptions = col.options || [];
-          tagOptions.forEach(opt => {
-            const optId = typeof opt === 'string' ? opt : (opt.id || opt.name);
-            const optName = typeof opt === 'string' ? opt : opt.name;
-            const isSel = filter.value === optId;
-            select.innerHTML += `<option value="${optId}" ${isSel ? 'selected' : ''}>${escapeHTML(optName)}</option>`;
+          // 現在値の表示名を取得
+          const getOptName = (val) => {
+            const found = tagOptions.find(o => (typeof o === 'string' ? o : (o.id || o.name)) === val);
+            return found ? (typeof found === 'string' ? found : found.name) : val;
+          };
+          input.value = getOptName(filter.value || '');
+
+          // ドロップダウンリストの作成
+          const list = document.createElement('div');
+          list.style = 'position: absolute; left: 0; right: 0; top: 100%; max-height: 150px; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; z-index: 10000; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); padding: 4px; flex-direction: column; gap: 2px;';
+
+          // リストの項目を生成
+          const renderListItems = (query = '') => {
+            list.innerHTML = '';
+            const filtered = tagOptions.filter(o => {
+              const name = typeof o === 'string' ? o : o.name;
+              return name.toLowerCase().includes(query.toLowerCase());
+            });
+
+            if (filtered.length === 0) {
+              const empty = document.createElement('div');
+              empty.style = 'font-size: 11px; color: var(--text-muted); padding: 6px; text-align: center;';
+              empty.textContent = '見つかりません';
+              list.appendChild(empty);
+              return;
+            }
+
+            filtered.forEach(opt => {
+              const optId = typeof opt === 'string' ? opt : (opt.id || opt.name);
+              const optName = typeof opt === 'string' ? opt : opt.name;
+              const color = typeof opt === 'string' ? 'gray' : (opt.color || 'gray');
+
+              const item = document.createElement('div');
+              item.className = 'db-popover-item';
+              item.style = 'padding: 4px 6px; display: flex; align-items: center; border-radius: 4px; cursor: pointer;';
+              item.innerHTML = `<span class="db-select-badge db-tag-${color}">${escapeHTML(optName)}</span>`;
+
+              item.addEventListener('mousedown', (evt) => {
+                evt.preventDefault(); // blurでの即閉じを防ぐ
+                input.value = optName;
+                filter.value = optId;
+                list.style.display = 'none';
+                saveNotesToStorage();
+                renderEditor();
+              });
+              list.appendChild(item);
+            });
+          };
+
+          input.addEventListener('focus', () => {
+            renderListItems(input.value);
+            list.style.display = 'flex';
           });
 
-          if (tagOptions.length === 0) {
-            select.innerHTML = '<option value="">タグ未登録</option>';
-            filter.value = '';
-          } else if (!filter.value || !tagOptions.some(o => (typeof o === 'string' ? o : (o.id || o.name)) === filter.value)) {
-            const firstOpt = tagOptions[0];
-            filter.value = typeof firstOpt === 'string' ? firstOpt : (firstOpt.id || firstOpt.name);
-          }
-
-          select.addEventListener('change', () => {
-            filter.value = select.value;
+          input.addEventListener('blur', () => {
+            setTimeout(() => {
+              list.style.display = 'none';
+              // 未選択や一致しない値の時のフォールバック
+              const found = tagOptions.find(o => {
+                const name = typeof o === 'string' ? o : o.name;
+                return name.toLowerCase() === input.value.trim().toLowerCase();
+              });
+              if (found) {
+                const optId = typeof found === 'string' ? found : (found.id || found.name);
+                const optName = typeof found === 'string' ? found : found.name;
+                input.value = optName;
+                filter.value = optId;
+              } else {
+                input.value = getOptName(filter.value || '');
+              }
+              saveNotesToStorage();
+              renderEditor();
+            }, 150);
           });
 
-          valContainer.appendChild(select);
+          input.addEventListener('input', () => {
+            renderListItems(input.value);
+          });
+
+          searchWrapper.appendChild(input);
+          searchWrapper.appendChild(list);
+          valContainer.appendChild(searchWrapper);
         } else if (col.type === 'checkbox') {
           // チェックボックス用のON / OFFセレクト
           const select = document.createElement('select');
@@ -2564,13 +2665,20 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
   let tagOptions = [];
   if (col) {
     if (!col.options) col.options = [];
-    // もし古い文字列の配列だったらオブジェクトに変換
-    col.options = col.options.map(opt => {
+    const seen = new Set();
+    const uniqueOptions = [];
+    col.options.forEach(opt => {
+      let optObj = opt;
       if (typeof opt === 'string') {
-        return { id: opt, name: opt, color: getTagHashColor(opt) };
+        optObj = { id: opt, name: opt, color: getTagHashColor(opt) };
       }
-      return opt;
+      const normName = (optObj.name || '').trim().toLowerCase();
+      if (normName && !seen.has(normName)) {
+        seen.add(normName);
+        uniqueOptions.push(optObj);
+      }
     });
+    col.options = uniqueOptions;
     tagOptions = col.options;
   }
 
@@ -4321,20 +4429,28 @@ export function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
     const selectCols = dbBlock.properties.columns.filter(c => c.type === 'select');
     selectCols.forEach(col => {
       if (!col.options) col.options = [];
-      col.options = col.options.map(opt => {
+      const seen = new Set();
+      const uniqueOptions = [];
+      col.options.forEach(opt => {
+        let optObj = opt;
         if (typeof opt === 'string') {
-          return { id: opt, name: opt, color: getTagHashColor(opt) };
+          optObj = { id: opt, name: opt, color: getTagHashColor(opt) };
         }
-        return opt;
+        const normName = (optObj.name || '').trim().toLowerCase();
+        if (normName && !seen.has(normName)) {
+          seen.add(normName);
+          uniqueOptions.push(optObj);
+        }
       });
+      col.options = uniqueOptions;
 
-      const tagName = taskName || '作業セッション';
-      let found = col.options.find(o => o.name === tagName || o.id === tagName);
+      const tagName = (taskName || '作業セッション').trim();
+      let found = col.options.find(o => o.name.trim().toLowerCase() === tagName.toLowerCase());
       if (!found) {
         found = { id: tagName, name: tagName, color: 'gray' };
         col.options.push(found);
       }
-      targetRow[col.id] = tagName;
+      targetRow[col.id] = found.name;
     });
 
     // 実績時間の書き込み（1以上限定）
@@ -4406,19 +4522,28 @@ export function insertPomodoroLogToActiveNoteDb(taskName, durationMin) {
         newRow[col.id] = true;
       } else if (col.type === 'select') {
         if (!col.options) col.options = [];
-        col.options = col.options.map(opt => {
+        const seen = new Set();
+        const uniqueOptions = [];
+        col.options.forEach(opt => {
+          let optObj = opt;
           if (typeof opt === 'string') {
-            return { id: opt, name: opt, color: getTagHashColor(opt) };
+            optObj = { id: opt, name: opt, color: getTagHashColor(opt) };
           }
-          return opt;
+          const normName = (optObj.name || '').trim().toLowerCase();
+          if (normName && !seen.has(normName)) {
+            seen.add(normName);
+            uniqueOptions.push(optObj);
+          }
         });
-        const tagName = taskName || '作業セッション';
-        let found = col.options.find(o => o.name === tagName || o.id === tagName);
+        col.options = uniqueOptions;
+
+        const tagName = (taskName || '作業セッション').trim();
+        let found = col.options.find(o => o.name.trim().toLowerCase() === tagName.toLowerCase());
         if (!found) {
           found = { id: tagName, name: tagName, color: 'gray' };
           col.options.push(found);
         }
-        newRow[col.id] = tagName;
+        newRow[col.id] = found.name;
       } else {
         newRow[col.id] = '';
       }
@@ -6778,4 +6903,144 @@ function findDOMPositionByWikiOffset(container, wikiOffset) {
   }
 
   return traverse(container);
+}
+
+// CSV parsing RFC4180 compliant helper
+function parseCSV(text) {
+  const lines = [];
+  let row = [""];
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const next = text[i+1];
+
+    if (c === '"') {
+      if (inQuotes && next === '"') {
+        row[row.length - 1] += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (c === ',' && !inQuotes) {
+      row.push('');
+    } else if ((c === '\r' || c === '\n') && !inQuotes) {
+      if (c === '\r' && next === '\n') {
+        i++;
+      }
+      lines.push(row);
+      row = [''];
+    } else {
+      row[row.length - 1] += c;
+    }
+  }
+  if (row.length > 1 || row[0] !== '') {
+    lines.push(row);
+  }
+  return lines;
+}
+
+// Export database block rows to CSV file (UTF-8 BOM)
+function exportToCSV(block) {
+  const columns = block.properties.columns || [];
+  const rows = block.properties.rows || [];
+
+  const headers = columns.map(col => col.name);
+  const csvLines = [headers.map(h => `"${h.replace(/"/g, '""')}"`).join(',')];
+
+  rows.forEach(row => {
+    const line = columns.map(col => {
+      let val = row[col.id];
+      if (val === undefined || val === null) val = '';
+      if (col.type === 'checkbox') val = val ? 'ON' : 'OFF';
+      return `"${String(val).replace(/"/g, '""')}"`;
+    });
+    csvLines.push(line.join(','));
+  });
+
+  const csvContent = csvLines.join('\n');
+  const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${block.properties.tableName || 'database'}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// Import rows from CSV file and automatically create missing columns
+function importFromCSV(block, file) {
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const text = e.target.result;
+    const data = parseCSV(text);
+    if (data.length < 2) {
+      showToast('有効なCSVデータが見つかりません。');
+      return;
+    }
+
+    const headers = data[0].map(h => h.trim());
+    const csvRows = data.slice(1);
+
+    const columns = block.properties.columns || [];
+    const colMap = {};
+
+    columns.forEach(col => {
+      colMap[col.name.toLowerCase()] = col.id;
+    });
+
+    headers.forEach(header => {
+      const lower = header.toLowerCase();
+      if (!colMap[lower]) {
+        const newColId = 'col-' + generateId();
+        columns.push({
+          id: newColId,
+          name: header,
+          type: 'text',
+          width: 130
+        });
+        colMap[lower] = newColId;
+      }
+    });
+
+    csvRows.forEach(csvRow => {
+      if (csvRow.length === 0 || (csvRow.length === 1 && csvRow[0] === '')) return;
+      const newRow = {};
+      
+      columns.forEach(col => {
+        if (col.type === 'status') {
+          const defaultOpt = col.options && col.options.length > 0 ? col.options[0].name : '未着手';
+          newRow[col.id] = defaultOpt;
+        } else if (col.type === 'checkbox') {
+          newRow[col.id] = false;
+        } else {
+          newRow[col.id] = '';
+        }
+      });
+
+      headers.forEach((header, idx) => {
+        const colId = colMap[header.toLowerCase()];
+        if (colId && csvRow[idx] !== undefined) {
+          const col = columns.find(c => c.id === colId);
+          let val = csvRow[idx];
+          if (col) {
+            if (col.type === 'checkbox') {
+              val = (val === 'ON' || val === 'true' || val === '1' || val === true);
+            }
+          }
+          newRow[col.id] = val;
+        }
+      });
+
+      block.properties.rows.push(newRow);
+    });
+
+    saveNotesToStorage();
+    renderEditor();
+    showToast('CSVデータをインポートしました。');
+  };
+  reader.readAsText(file);
 }

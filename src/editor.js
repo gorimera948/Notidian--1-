@@ -395,6 +395,155 @@ export function createBlockDOM(block, parentBlock = null) {
     return blockWrapper;
   }
 
+  if (block.type === 'image') {
+    blockWrapper.classList.add('image-block-wrapper');
+
+    const container = document.createElement('div');
+    container.className = 'image-block-container';
+    
+    // Load saved size properties (30%, 50%, 100%)
+    const size = block.properties?.size || '100';
+    let widthVal = '100%';
+    if (size === '30') widthVal = '30%';
+    else if (size === '50') widthVal = '50%';
+    
+    container.style = `position: relative; width: ${widthVal}; max-width: 600px; margin: 8px 0; border-radius: 8px; overflow: hidden; transition: width 0.2s ease;`;
+
+    const url = block.properties?.url || '';
+
+    if (!url) {
+      // Image uploader UI
+      const uploader = document.createElement('div');
+      uploader.className = 'image-uploader';
+      uploader.style = 'border: 2px dashed var(--border-light); border-radius: 8px; padding: 20px; text-align: center; background: rgba(0,0,0,0.2); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px;';
+      uploader.innerHTML = `
+        <i class="fa-regular fa-image" style="font-size: 24px; color: var(--accent-primary);"></i>
+        <span style="font-size: 12px; color: var(--text-secondary);">クリックして画像ファイルを選択、またはURLを入力</span>
+        <input type="text" placeholder="画像のURLを入力してEnterキーを押す..." class="image-url-input" style="width: 80%; padding: 4px 8px; font-size: 11px; margin-top: 8px; text-align: center;" onclick="event.stopPropagation()">
+      `;
+
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.style.display = 'none';
+
+      fileInput.addEventListener('change', (evt) => {
+        const file = evt.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            block.properties = block.properties || {};
+            block.properties.url = e.target.result;
+            saveNotesToStorage();
+            renderEditor();
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      uploader.addEventListener('click', (evt) => {
+        if (evt.target.closest('.image-url-input')) return;
+        fileInput.click();
+      });
+
+      const urlInput = uploader.querySelector('.image-url-input');
+      urlInput.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Enter') {
+          const val = urlInput.value.trim();
+          if (val) {
+            block.properties = block.properties || {};
+            block.properties.url = val;
+            saveNotesToStorage();
+            renderEditor();
+          }
+        }
+      });
+
+      container.appendChild(uploader);
+      container.appendChild(fileInput);
+    } else {
+      // Render image with controls
+      const img = document.createElement('img');
+      img.src = url;
+      img.style = 'width: 100%; display: block; height: auto; border-radius: 6px;';
+      container.appendChild(img);
+
+      const imgControls = document.createElement('div');
+      imgControls.className = 'image-block-controls';
+      imgControls.style = 'position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s ease; z-index: 100;';
+
+      // Width buttons
+      const size30Btn = document.createElement('button');
+      size30Btn.className = 'btn-icon-secondary';
+      size30Btn.style = 'background: rgba(13,17,28,0.85); color: #fff; border: 1px solid var(--border-light); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer;';
+      size30Btn.textContent = '30%';
+      size30Btn.addEventListener('click', () => {
+        block.properties = block.properties || {};
+        block.properties.size = '30';
+        saveNotesToStorage();
+        renderEditor();
+      });
+      imgControls.appendChild(size30Btn);
+
+      const size50Btn = document.createElement('button');
+      size50Btn.className = 'btn-icon-secondary';
+      size50Btn.style = 'background: rgba(13,17,28,0.85); color: #fff; border: 1px solid var(--border-light); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer;';
+      size50Btn.textContent = '50%';
+      size50Btn.addEventListener('click', () => {
+        block.properties = block.properties || {};
+        block.properties.size = '50';
+        saveNotesToStorage();
+        renderEditor();
+      });
+      imgControls.appendChild(size50Btn);
+
+      const size100Btn = document.createElement('button');
+      size100Btn.className = 'btn-icon-secondary';
+      size100Btn.style = 'background: rgba(13,17,28,0.85); color: #fff; border: 1px solid var(--border-light); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer;';
+      size100Btn.textContent = '100%';
+      size100Btn.addEventListener('click', () => {
+        block.properties = block.properties || {};
+        block.properties.size = '100';
+        saveNotesToStorage();
+        renderEditor();
+      });
+      imgControls.appendChild(size100Btn);
+
+      const changeBtn = document.createElement('button');
+      changeBtn.className = 'btn-icon-secondary';
+      changeBtn.style = 'background: rgba(13,17,28,0.85); color: #fff; border: 1px solid var(--border-light); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; display: flex; align-items: center; gap: 4px;';
+      changeBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> 変更';
+      changeBtn.addEventListener('click', () => {
+        block.properties = block.properties || {};
+        block.properties.url = '';
+        saveNotesToStorage();
+        renderEditor();
+      });
+      imgControls.appendChild(changeBtn);
+
+      container.appendChild(imgControls);
+
+      container.addEventListener('mouseenter', () => {
+        imgControls.style.opacity = '1';
+      });
+      container.addEventListener('mouseleave', () => {
+        imgControls.style.opacity = '0';
+      });
+    }
+
+    blockWrapper.appendChild(container);
+
+    const controls = createBlockControls(block.id, block.type);
+    blockWrapper.appendChild(controls);
+
+    const contentEl = document.createElement('div');
+    contentEl.className = 'block-content block-image-placeholder';
+    contentEl.style.display = 'none';
+    blockWrapper.appendChild(contentEl);
+
+    return blockWrapper;
+  }
+
   // Left Hover Controls
   const controls = createBlockControls(block.id, block.type);
   blockWrapper.appendChild(controls);
@@ -1396,10 +1545,15 @@ function setupDragDropListeners() {
             resolvedLocation = 'inside';
           }
         } else {
-          if (y < rect.height * 0.5) {
-            resolvedLocation = 'top';
-          } else {
+          // 隣り合うブロック間での行間判定の重複（チラつき）を防ぐため、常に「そのブロックの上（top）」を判定する。
+          // ただし、リストの「最後」のブロックに対してのみ、下半分（y >= rect.height * 0.5）で「下（bottom）」への挿入を許可する。
+          const parentArray = found ? found.parentArray : null;
+          const isLastInArray = parentArray && parentArray.indexOf(found.block) === parentArray.length - 1;
+
+          if (isLastInArray && y >= rect.height * 0.5) {
             resolvedLocation = 'bottom';
+          } else {
+            resolvedLocation = 'top';
           }
         }
       }
@@ -1751,6 +1905,10 @@ function selectSlashMenuItem() {
     found.block.properties = { emoji: '💡', color: 'purple' };
   }
   if (newType === 'divider') {
+    found.block.content = '';
+  }
+  if (newType === 'image') {
+    found.block.properties = { url: '', size: '100' };
     found.block.content = '';
   }
   if (newType === 'database') {

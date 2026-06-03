@@ -1035,17 +1035,7 @@ select:focus {
   background: rgba(255, 255, 255, 0.02);
 }
 
-/* カラム内の行のブロックコントロールは、選択時またはフォーカス時のみ表示するように厳格化（ホバー時は表示しないことで、カラム内での視覚的ノイズを劇的に排除） */
-.column-block .block-wrapper > .block-controls {
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
 
-.column-block .block-wrapper.selected > .block-controls,
-.column-block .block-wrapper:focus-within > .block-controls {
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
 
 .column-resizer {
   width: 8px;
