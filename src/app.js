@@ -287,7 +287,11 @@ if (noteTitleInput) {
 // BACKLINKS & OUTGOING LINKS
 // ==========================================
 export function updateBacklinks() {
-  const panel = document.getElementById('backlinks-panel-content');
+  // 1. 下部リンクパネルの更新
+  let panel = document.getElementById('backlinks-panel-content');
+  if (!panel) {
+    panel = document.getElementById('note-links-panel');
+  }
   if (!panel) return;
   panel.innerHTML = '';
 
@@ -2346,6 +2350,58 @@ function initApp() {
           return;
         }
 
+        // クリックされたY座標に基づいて最も近いブロックを探す
+        const clickY = e.clientY;
+        const wrappers = Array.from(blockCanvas.querySelectorAll('.block-wrapper'));
+        
+        let closestWrapper = null;
+        let isBelowLastBlock = true;
+
+        wrappers.forEach(wrapper => {
+          const rect = wrapper.getBoundingClientRect();
+          // クリックされた位置がブロックの縦範囲内である場合
+          if (clickY >= rect.top && clickY <= rect.bottom) {
+            closestWrapper = wrapper;
+            isBelowLastBlock = false;
+          }
+          
+          // 最後のブロックの底より上かどうか
+          if (clickY < rect.bottom) {
+            isBelowLastBlock = false;
+          }
+        });
+
+        // 特定のブロックの高さ範囲内ならそのブロックにフォーカス
+        if (closestWrapper) {
+          const content = closestWrapper.querySelector('.block-content');
+          if (content) {
+            focusBlock(content);
+            return;
+          }
+        }
+
+        // 最後のブロックより上で、隙間をクリックした場合は最も近いブロックにフォーカス
+        if (!isBelowLastBlock && wrappers.length > 0) {
+          let bestWrapper = null;
+          let bestDist = Infinity;
+          wrappers.forEach(wrapper => {
+            const rect = wrapper.getBoundingClientRect();
+            const dist = Math.abs(clickY - (rect.top + rect.height / 2));
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestWrapper = wrapper;
+            }
+          });
+          if (bestWrapper) {
+            const content = bestWrapper.querySelector('.block-content');
+            if (content) {
+              focusBlock(content);
+              return;
+            }
+          }
+        }
+
+        // 最後のブロックより下（本当に最下部の余白）をクリックした場合は従来の新規作成・フォーカス処理
         const lastBlock = note.blocks[note.blocks.length - 1];
         if (lastBlock && lastBlock.type === 'p' && (!lastBlock.content || lastBlock.content.trim() === '')) {
           const el = document.querySelector(`.block-content[data-id="${lastBlock.id}"]`);
@@ -2412,6 +2468,28 @@ function initApp() {
   renderAnalytics();
   updateBacklinks();
   updateHistoryButtons();
+
+  // Navigation history buttons click bindings
+  const backBtn = document.getElementById('btn-history-back');
+  const forwardBtn = document.getElementById('btn-history-forward');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      if (state.historyIndex > 0) {
+        state.historyIndex--;
+        const prevNoteId = state.noteHistory[state.historyIndex];
+        navigateToNote(prevNoteId, false);
+      }
+    });
+  }
+  if (forwardBtn) {
+    forwardBtn.addEventListener('click', () => {
+      if (state.historyIndex < state.noteHistory.length - 1) {
+        state.historyIndex++;
+        const nextNoteId = state.noteHistory[state.historyIndex];
+        navigateToNote(nextNoteId, false);
+      }
+    });
+  }
 
   // IME input helpers
   window.addEventListener('compositionstart', () => {

@@ -1817,20 +1817,66 @@ function closeSlashMenu() {
 
 
 // 複数行テキストの貼り付け時に改行ごとにブロックを分割して1行ずつ展開する処理
-function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directOffset = null) {
-  const clipboardText = directText !== null ? directText : (e ? e.clipboardData.getData('text/plain') : '');
-  if (!clipboardText) return;
+// 構造化されたHTMLからNotidianのブロックデータをパースするヘルパー
+function parseNotidianBlocksFromHtml(htmlText) {
+  if (!htmlText) return null;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlText, 'text/html');
+    const container = doc.querySelector('[data-notidian-blocks="true"]');
+    if (!container) return null;
 
-  // 改行が含まれていない場合はブラウザ標準の貼り付けに任せる（手動指示の時は実行）
-  if (directText === null && !clipboardText.includes('\n') && !clipboardText.includes('\r')) {
+    const blockDivs = container.querySelectorAll('[data-block-type]');
+    if (blockDivs.length === 0) return null;
+
+    const blocks = [];
+    blockDivs.forEach(div => {
+      const type = div.getAttribute('data-block-type');
+      const propertiesRaw = div.getAttribute('data-block-properties');
+      let properties = undefined;
+      if (propertiesRaw) {
+        try {
+          properties = JSON.parse(propertiesRaw);
+        } catch (e) {
+          console.error("Failed to parse block properties in paste:", e);
+        }
+      }
+      const content = div.textContent;
+      blocks.push({
+        type: type,
+        properties: properties,
+        content: content
+      });
+    });
+
+    return blocks;
+  } catch (e) {
+    console.error("Failed to parse HTML blocks from clipboard:", e);
+    return null;
+  }
+}
+
+function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directOffset = null, directStructuredBlocks = null) {
+  let structuredBlocks = directStructuredBlocks;
+  let clipboardText = directText;
+
+  if (e && !structuredBlocks) {
+    const htmlText = e.clipboardData.getData('text/html');
+    structuredBlocks = parseNotidianBlocksFromHtml(htmlText);
+  }
+
+  if (e && clipboardText === null) {
+    clipboardText = e.clipboardData.getData('text/plain');
+  }
+
+  if (!structuredBlocks && !clipboardText) return;
+
+  if (!structuredBlocks && directText === null && !clipboardText.includes('\n') && !clipboardText.includes('\r')) {
     return;
   }
 
   if (e) e.preventDefault();
   pushHistory();
-
-  const lines = clipboardText.split(/\r?\n/).filter(line => line !== null);
-  if (lines.length === 0) return;
 
   const note = getActiveNote();
   if (!note) return;
@@ -1840,7 +1886,6 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
 
   state.isPasting = true;
 
-  // 現在のカーソル位置でテキストを分割
   let prefix = '';
   let suffix = '';
 
@@ -1853,7 +1898,6 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
     if (selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
 
-      // prefixの取得（選択範囲の開始位置まで）
       const preCaretRange = range.cloneRange();
       preCaretRange.selectNodeContents(contentDiv);
       preCaretRange.setEnd(range.startContainer, range.startOffset);
@@ -1862,7 +1906,6 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
       tempDivStart.appendChild(fragmentStart);
       prefix = serializeHtmlToWikiText(tempDivStart);
 
-      // suffixの取得（選択範囲 of 終了位置から後ろ）
       const preCaretRangeEnd = range.cloneRange();
       preCaretRangeEnd.selectNodeContents(contentDiv);
       preCaretRangeEnd.setEnd(range.endContainer, range.endOffset);
@@ -1879,43 +1922,76 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
     }
   }
 
-  // 1行目の処理：現在のブロックのカーソルの前に1行目のテキストを挿入
-  activeBlock.content = prefix + lines[0];
-
-  // 2行目以降の新規ブロックの作成と挿入
   const newBlocks = [];
-  for (let i = 1; i < lines.length; i++) {
-    // 見出しやデータベースは段落(p)にフォールバック、その他は元のタイプを継承
-    const newType = (activeBlock.type === 'h1' || activeBlock.type === 'h2' || activeBlock.type === 'database') ? 'p' : activeBlock.type;
-    const blockContent = lines[i];
+  let targetBlockId = activeBlock.id;
+  let focusOffset = 0;
 
-    const newB = { id: generateId(), type: newType, content: blockContent };
-    if (newType === 'todo') newB.properties = { checked: false };
-    if (newType === 'toggle') newB.properties = { open: true, children: [] };
-    if (newType === 'callout') newB.properties = { emoji: '💡' };
+  if (structuredBlocks && structuredBlocks.length > 0) {
+    activeBlock.content = prefix + structuredBlocks[0].content;
 
-    newBlocks.push(newB);
-  }
+    for (let i = 1; i < structuredBlocks.length; i++) {
+      const blockData = structuredBlocks[i];
+      const newB = {
+        id: generateId(),
+        type: blockData.type,
+        content: blockData.content,
+        properties: blockData.properties ? JSON.parse(JSON.stringify(blockData.properties)) : undefined
+      };
+      newBlocks.push(newB);
+    }
 
-  // 最後の行の末尾に、元のブロックの「カーソルより後ろ」のテキストを結合
-  if (newBlocks.length > 0) {
-    newBlocks[newBlocks.length - 1].content += suffix;
+    if (newBlocks.length > 0) {
+      newBlocks[newBlocks.length - 1].content += suffix;
+      targetBlockId = newBlocks[newBlocks.length - 1].id;
+      focusOffset = structuredBlocks[structuredBlocks.length - 1].content.length;
+    } else {
+      activeBlock.content += suffix;
+      targetBlockId = activeBlock.id;
+      focusOffset = prefix.length + structuredBlocks[0].content.length;
+    }
   } else {
-    activeBlock.content += suffix;
+    const lines = clipboardText.split(/\r?\n/).filter(line => line !== null);
+    if (lines.length === 0) {
+      state.isPasting = false;
+      return;
+    }
+
+    activeBlock.content = prefix + lines[0];
+
+    for (let i = 1; i < lines.length; i++) {
+      const newType = (activeBlock.type === 'h1' || activeBlock.type === 'h2' || activeBlock.type === 'database') ? 'p' : activeBlock.type;
+      const blockContent = lines[i];
+
+      const newB = { id: generateId(), type: newType, content: blockContent };
+      if (newType === 'todo') newB.properties = { checked: false };
+      if (newType === 'toggle') newB.properties = { open: true, children: [] };
+      if (newType === 'callout') newB.properties = { emoji: '💡' };
+
+      newBlocks.push(newB);
+    }
+
+    if (newBlocks.length > 0) {
+      newBlocks[newBlocks.length - 1].content += suffix;
+      targetBlockId = newBlocks[newBlocks.length - 1].id;
+      focusOffset = lines[lines.length - 1].length;
+    } else {
+      activeBlock.content += suffix;
+      targetBlockId = activeBlock.id;
+      focusOffset = prefix.length + lines[0].length;
+    }
   }
 
-  // 親の配列に新しいブロックを挿入
   found.parentArray.splice(found.index + 1, 0, ...newBlocks);
 
   saveNotesToStorage();
   renderEditor();
 
-  // 貼り付け完了後、最後の行が貼り付けられたブロックの末尾にカーソルを移動
-  const targetBlockId = newBlocks.length > 0 ? newBlocks[newBlocks.length - 1].id : activeBlock.id;
-  const targetContent = newBlocks.length > 0 ? lines[lines.length - 1] : lines[0];
-  const focusOffset = (newBlocks.length > 0 ? targetContent.length : (prefix.length + targetContent.length));
-
   setTimeout(() => {
+    // 他のブロックに既にフォーカスが移動している場合は、強制カーソル移動をキャンセルする
+    if (state.activeFocusedBlockId && state.activeFocusedBlockId !== activeBlock.id && state.activeFocusedBlockId !== targetBlockId) {
+      state.isPasting = false;
+      return;
+    }
     const el = document.querySelector(`.block-content[data-id="${targetBlockId}"]`);
     if (el) {
       focusBlock(el);
@@ -2778,6 +2854,65 @@ export function setupMultipleBlockSelectionShortcuts() {
     return copiedLines.join('\n');
   }
 
+  function getMultipleBlockSelectionData(selInfo) {
+    const { range, startEl, endEl } = selInfo;
+    const startId = startEl.getAttribute('data-id');
+    const endId = endEl.getAttribute('data-id');
+
+    const note = getActiveNote();
+    if (!note) return null;
+
+    const flatBlocks = getAllBlocksFlat(note.blocks);
+    const startIdx = flatBlocks.findIndex(b => b.id === startId);
+    const endIdx = flatBlocks.findIndex(b => b.id === endId);
+
+    if (startIdx === -1 || endIdx === -1) return null;
+
+    let firstEl = startEl;
+    let lastEl = endEl;
+    let firstIdx = startIdx;
+    let lastIdx = endIdx;
+    let firstRangeContainer = range.startContainer;
+    let firstRangeOffset = range.startOffset;
+    let lastRangeContainer = range.endContainer;
+    let lastRangeOffset = range.endOffset;
+
+    if (startIdx > endIdx) {
+      firstEl = endEl;
+      lastEl = startEl;
+      firstIdx = endIdx;
+      lastIdx = startIdx;
+      firstRangeContainer = range.endContainer;
+      firstRangeOffset = range.endOffset;
+      lastRangeContainer = range.startContainer;
+      lastRangeOffset = range.startOffset;
+    }
+
+    const copiedBlocks = [];
+    for (let i = firstIdx; i <= lastIdx; i++) {
+      const block = flatBlocks[i];
+      const blockEl = document.querySelector(`.block-content[data-id="${block.id}"]`);
+      if (!blockEl) continue;
+
+      let content = '';
+      if (i === firstIdx) {
+        content = getWikiTextAfter(firstEl, firstRangeContainer, firstRangeOffset, serializeHtmlToWikiText(firstEl));
+      } else if (i === lastIdx) {
+        content = getWikiTextBefore(lastEl, lastRangeContainer, lastRangeOffset, serializeHtmlToWikiText(lastEl));
+      } else {
+        content = serializeHtmlToWikiText(blockEl);
+      }
+
+      copiedBlocks.push({
+        type: block.type,
+        properties: block.properties ? JSON.parse(JSON.stringify(block.properties)) : undefined,
+        content: content
+      });
+    }
+
+    return copiedBlocks;
+  }
+
   function setCaretByWikiOffset(el, wikiOffset) {
     try {
       const range = document.createRange();
@@ -2860,30 +2995,83 @@ export function setupMultipleBlockSelectionShortcuts() {
 
     if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === 'c') {
       e.preventDefault();
-      const selectedText = getMultipleBlockSelectionWikiText(selInfo);
-      navigator.clipboard.writeText(selectedText).catch(err => {
-        console.error("Failed to copy multiple block selection: ", err);
-      });
+      const copiedBlocks = getMultipleBlockSelectionData(selInfo);
+      if (copiedBlocks) {
+        const plainText = copiedBlocks.map(b => b.content).join('\n');
+        const htmlText = `<div data-notidian-blocks="true">` + 
+          copiedBlocks.map(b => {
+            const props = b.properties ? JSON.stringify(b.properties) : '';
+            return `<div data-block-type="${escapeHTML(b.type)}" data-block-properties="${escapeHTML(props)}">${escapeHTML(b.content)}</div>`;
+          }).join('') + `</div>`;
+
+        const blobText = new Blob([plainText], { type: 'text/plain' });
+        const blobHtml = new Blob([htmlText], { type: 'text/html' });
+
+        navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': blobText,
+            'text/html': blobHtml
+          })
+        ]).then(() => {
+          showToast(`${copiedBlocks.length}件のブロックをコピーしました`);
+        }).catch(err => {
+          console.error("Failed to copy structured multiple block selection: ", err);
+          navigator.clipboard.writeText(plainText).then(() => {
+            showToast(`${copiedBlocks.length}件のブロックをコピーしました（テキストのみ）`);
+          }).catch(e => console.error(e));
+        });
+      }
       return;
     }
 
     if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === 'x') {
       e.preventDefault();
-      const selectedText = getMultipleBlockSelectionWikiText(selInfo);
-      navigator.clipboard.writeText(selectedText).then(() => {
-        const res = deleteMultipleBlockSelection(selInfo);
-        if (res) {
-          setTimeout(() => {
-            const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
-            if (el) {
-              focusBlock(el);
-              setCaretByWikiOffset(el, res.mergeOffset);
+      const copiedBlocks = getMultipleBlockSelectionData(selInfo);
+      if (copiedBlocks) {
+        const plainText = copiedBlocks.map(b => b.content).join('\n');
+        const htmlText = `<div data-notidian-blocks="true">` + 
+          copiedBlocks.map(b => {
+            const props = b.properties ? JSON.stringify(b.properties) : '';
+            return `<div data-block-type="${escapeHTML(b.type)}" data-block-properties="${escapeHTML(props)}">${escapeHTML(b.content)}</div>`;
+          }).join('') + `</div>`;
+
+        const blobText = new Blob([plainText], { type: 'text/plain' });
+        const blobHtml = new Blob([htmlText], { type: 'text/html' });
+
+        navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': blobText,
+            'text/html': blobHtml
+          })
+        ]).then(() => {
+          showToast(`${copiedBlocks.length}件のブロックを切り取りました`);
+          const res = deleteMultipleBlockSelection(selInfo);
+          if (res) {
+            setTimeout(() => {
+              const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
+              if (el) {
+                focusBlock(el);
+                setCaretByWikiOffset(el, res.mergeOffset);
+              }
+            }, 50);
+          }
+        }).catch(err => {
+          console.error("Failed to copy cut text: ", err);
+          navigator.clipboard.writeText(plainText).then(() => {
+            showToast(`${copiedBlocks.length}件のブロックを切り取りました（テキストのみ）`);
+            const res = deleteMultipleBlockSelection(selInfo);
+            if (res) {
+              setTimeout(() => {
+                const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
+                if (el) {
+                  focusBlock(el);
+                  setCaretByWikiOffset(el, res.mergeOffset);
+                }
+              }, 50);
             }
-          }, 50);
-        }
-      }).catch(err => {
-        console.error("Failed to copy cut text: ", err);
-      });
+          }).catch(e => console.error(e));
+        });
+      }
       return;
     }
   }, true);
@@ -2894,7 +3082,10 @@ export function setupMultipleBlockSelectionShortcuts() {
 
     e.preventDefault();
     const clipboardText = e.clipboardData.getData('text/plain');
-    if (!clipboardText) return;
+    const htmlText = e.clipboardData.getData('text/html');
+    const structuredBlocks = parseNotidianBlocksFromHtml(htmlText);
+
+    if (!structuredBlocks && !clipboardText) return;
 
     const res = deleteMultipleBlockSelection(selInfo);
     if (!res) return;
@@ -2906,11 +3097,11 @@ export function setupMultipleBlockSelectionShortcuts() {
       focusBlock(el);
       setCaretByWikiOffset(el, res.mergeOffset);
 
-      if (clipboardText.includes('\n') || clipboardText.includes('\r')) {
+      if (structuredBlocks || clipboardText.includes('\n') || clipboardText.includes('\r')) {
         const note = getActiveNote();
         const found = findBlockAndParent(note.blocks, res.targetBlockId);
         if (found) {
-          handleBlockPaste(null, found.block, el, clipboardText, res.mergeOffset);
+          handleBlockPaste(null, found.block, el, clipboardText, res.mergeOffset, structuredBlocks);
         }
       } else {
         const note = getActiveNote();

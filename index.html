@@ -39,14 +39,14 @@
 
         <div class="pomodoro-content" id="pomodoro-widget-content">
           <!-- Timer Display Card -->
-          <div class="timer-card">
+          <div class="timer-card" id="pomodoro-timer-card">
             <div class="timer-display-wrapper">
+              <canvas id="circle" width="130" height="130"></canvas>
               <div class="timer-text-group">
                 <div id="currentIndex">0/0</div>
-                <div id="taskName" title="現在のタスク">未選択</div>
                 <div id="time">00:00</div>
+                <div id="taskName" title="現在のタスク">未選択</div>
               </div>
-              <canvas id="circle" width="130" height="130"></canvas>
             </div>
 
             <div class="timer-controls">
@@ -74,7 +74,7 @@
           <!-- Pomodoro Manager -->
           <div class="pomodoro-settings">
             <!-- 1. Schedule View -->
-            <div class="settings-group">
+            <div class="pomodoro-card">
               <div class="settings-group-header">
                 <h4>現在のスケジュール</h4>
               </div>
@@ -84,7 +84,7 @@
             </div>
 
             <!-- 2. Set Creation & Presets -->
-            <div class="settings-group">
+            <div class="pomodoro-card">
               <div class="accordion-header" id="accordion-sets-header">
                 <span><i class="fa-solid fa-plus"></i> セット / スケジュール追加</span>
                 <i class="fa-solid fa-chevron-right arrow-icon"></i>
@@ -143,7 +143,7 @@
               </div>
             </div>
 
-            <div class="settings-group">
+            <div class="pomodoro-card">
               <div class="accordion-header" id="accordion-presets-header">
                 <span><i class="fa-solid fa-bookmark"></i> スケジュールプリセット</span>
                 <i class="fa-solid fa-chevron-right arrow-icon"></i>
@@ -198,7 +198,7 @@
         </ul>
         <!-- Tags Section inside sidebar -->
         <div class="sidebar-tags-wrapper"
-          style="margin-top: 20px; padding: 0 12px; border-top: 1px solid var(--border-color, #374151); padding-top: 16px;">
+          style="margin-top: 20px; padding: 0 12px; border-top: 1px solid var(--border-color, #374151); padding-top: 16px; padding-bottom: 80px;">
           <div
             style="font-size: 11px; font-weight: 700; color: var(--text-muted, #6b7280); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
             <i class="fa-solid fa-tags" style="color: var(--accent-secondary, #ec4899);"></i> タグ一覧

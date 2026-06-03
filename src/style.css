@@ -291,8 +291,7 @@ body {
 
 /* Pomodoro Widget Inside Sidebar */
 .pomodoro-section {
-  border-top: 1px solid var(--border-light);
-  background: rgba(10, 12, 22, 0.5);
+  padding: 15px 20px 8px 20px;
   max-height: 60vh;
 }
 
@@ -328,34 +327,49 @@ body {
 }
 
 .timer-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-light);
+  background: rgba(0, 0, 0, 0.25);
+  border: 2px solid rgba(139, 92, 246, 0.4);
   border-radius: 12px;
   padding: 12px;
-  box-shadow: var(--shadow-card);
-  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 状態別ボーダー・グロー */
+.timer-card.status-work {
+  border-color: var(--accent-blue) !important;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.35) !important;
+}
+
+.timer-card.status-break {
+  border-color: var(--accent-green) !important;
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.35) !important;
 }
 
 .timer-display-wrapper {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  width: 100%;
 }
 
 .timer-text-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  text-align: center;
 }
 
 #currentIndex {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: var(--accent-primary);
+  color: var(--accent-purple);
   font-weight: 700;
 }
 
@@ -363,6 +377,7 @@ body {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
+  width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -440,11 +455,23 @@ canvas#circle {
 .settings-group {
   border: 1px solid var(--border-light);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.01);
+  background: rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  margin-bottom: 8px;
 }
 
-.settings-group h4 {
+.pomodoro-card {
+  border: 2px solid rgba(139, 92, 246, 0.4);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  margin-bottom: 8px;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.08);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.settings-group h4,
+.pomodoro-card h4 {
   font-size: 11px;
   text-transform: uppercase;
   color: var(--text-secondary);
@@ -789,7 +816,7 @@ select:focus {
   pointer-events: none;
 }
 
-.block-wrapper:hover .block-controls {
+.block-wrapper:hover > .block-controls {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1009,13 +1036,13 @@ select:focus {
 }
 
 /* カラム内の行のブロックコントロールは、選択時またはフォーカス時のみ表示するように厳格化（ホバー時は表示しないことで、カラム内での視覚的ノイズを劇的に排除） */
-.column-block .block-wrapper .block-controls {
+.column-block .block-wrapper > .block-controls {
   opacity: 0 !important;
   pointer-events: none !important;
 }
 
-.column-block .block-wrapper.selected .block-controls,
-.column-block .block-wrapper:focus-within .block-controls {
+.column-block .block-wrapper.selected > .block-controls,
+.column-block .block-wrapper:focus-within > .block-controls {
   opacity: 1 !important;
   pointer-events: auto !important;
 }
@@ -2021,7 +2048,7 @@ svg#cumulative-chart {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-  cursor: pointer;
+  cursor: grab;
   transition: var(--transition-smooth);
   position: relative;
   border-bottom: 2px solid transparent;
@@ -3597,6 +3624,30 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   /* 鮮やかなブルー */
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.2) !important;
   transition: background-color 0.20s ease, border-left 0.20s ease !important;
+}
+
+/* ==========================================
+   ADDITIONAL NOTIDIAN PREMIUM CUSTOM STYLES
+   ========================================= */
+
+/* Database Views Tab Container */
+.db-views-tab-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sortable-ghost-tab {
+  opacity: 0.4;
+  background: rgba(139, 92, 246, 0.15) !important;
+  border-bottom: 2px dashed var(--accent-primary) !important;
+}
+
+.sortable-fallback-tab {
+  opacity: 0.8;
+  background: rgba(139, 92, 246, 0.25) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+  pointer-events: none;
 }
 
 /* 一括選択用チェックボックスの見た目微調整 */

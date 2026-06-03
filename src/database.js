@@ -2,6 +2,8 @@ import { state, getActiveNote, saveNotesToStorage, getActiveNormalNotes, pushHis
 import { generateId, escapeHTML, showToast, formatMS, getFormattedTime, getFormattedTimeFromMs } from './utils.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu } from './wikilinks.js';
 
+let isDraggingViewTab = false;
+
 function renderEditor() {
   if (window.Notidian && typeof window.Notidian.renderEditor === 'function') {
     window.Notidian.renderEditor();
@@ -415,6 +417,10 @@ export function createDatabaseDOM(block) {
   const tabBar = document.createElement('div');
   tabBar.className = 'db-views-tab-bar';
 
+  // ドラッグ可能なタブ要素のみを格納する専用のコンテナ
+  const tabContainer = document.createElement('div');
+  tabContainer.className = 'db-views-tab-container';
+
   views.forEach(view => {
     const tab = document.createElement('div');
     tab.className = `db-view-tab ${view.id === activeViewId ? 'active' : ''}`;
@@ -497,6 +503,7 @@ export function createDatabaseDOM(block) {
     }
 
     tab.addEventListener('click', () => {
+      if (isDraggingViewTab) return;
       if (block.properties.activeViewId !== view.id) {
         block.properties.activeViewId = view.id;
         saveNotesToStorage();
@@ -504,8 +511,10 @@ export function createDatabaseDOM(block) {
       }
     });
 
-    tabBar.appendChild(tab);
+    tabContainer.appendChild(tab);
   });
+
+  tabBar.appendChild(tabContainer);
 
   // ビュー追加ボタン
   const addViewBtn = document.createElement('button');
@@ -518,12 +527,22 @@ export function createDatabaseDOM(block) {
   tabBar.appendChild(addViewBtn);
 
   // Sortable.js を適用してビュータブの並び替えを有効にする
-  Sortable.create(tabBar, {
+  Sortable.create(tabContainer, {
     animation: 150,
     draggable: '.db-view-tab',
     filter: '.db-view-tab-input, button', // 入力フィールドや削除ボタンでのドラッグを防ぐ
     preventOnFilter: false,
+    forceFallback: true,
+    fallbackClass: 'sortable-fallback-tab',
+    ghostClass: 'sortable-ghost-tab',
+    onStart: () => {
+      isDraggingViewTab = true;
+    },
     onEnd: (evt) => {
+      setTimeout(() => {
+        isDraggingViewTab = false;
+      }, 200);
+
       if (evt.oldIndex === evt.newIndex) return;
 
       const movedView = block.properties.views.splice(evt.oldIndex, 1)[0];
@@ -1183,18 +1202,28 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
       } else {
         const cellDiv = document.createElement('div');
         cellDiv.className = 'db-cell-edit';
-        cellDiv.contentEditable = 'true';
 
         if (col.type === 'number') {
           cellDiv.style.textAlign = 'right';
-          cellDiv.textContent = val !== '' ? formatNumberValue(val, col) : '';
+          renderNumberCell(cellDiv, val, col);
 
-          // フォーカスON時はプレーンな数値に
-          cellDiv.addEventListener('focus', () => {
-            state.lastActiveEditTarget = cellDiv;
-            cellDiv.textContent = row[col.id] !== undefined ? row[col.id] : '';
-          });
+          if (col.numberFormat === 'progress') {
+            cellDiv.contentEditable = 'false';
+            cellDiv.addEventListener('click', (e) => {
+              if (cellDiv.querySelector('.db-progress-edit-wrapper')) return;
+              state.lastActiveEditTarget = cellDiv;
+              setupProgressInlineEdit(cellDiv, row, col, table, block, rowDataList);
+            });
+          } else {
+            cellDiv.contentEditable = 'true';
+            // フォーカスON時はプレーンな数値に
+            cellDiv.addEventListener('focus', () => {
+              state.lastActiveEditTarget = cellDiv;
+              cellDiv.textContent = row[col.id] !== undefined ? row[col.id] : '';
+            });
+          }
         } else {
+          cellDiv.contentEditable = 'true';
           // テキストタイプの場合はWikiリンクをパースしてHTML描画
           if (col.type === 'text' || !col.type) {
             cellDiv.innerHTML = parseWikiLinks(escapeHTML(val));
@@ -1218,6 +1247,11 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
           // すでにDOMから取り除かれている古い要素なら、非同期の暴発によるデータ破壊を防ぐため無視する
           if (!document.body.contains(cellDiv)) return;
 
+          // progress形式の場合は setupProgressInlineEdit 内部で保存と再描画を行うので、ここでは何もしない
+          if (col.type === 'number' && col.numberFormat === 'progress') {
+            return;
+          }
+
           let newVal;
           if (col.type === 'text' || !col.type) {
             newVal = serializeHtmlToWikiText(cellDiv).trim();
@@ -1227,7 +1261,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
             if (col.type === 'number') {
               const parsed = parseFloat(newVal);
               newVal = isNaN(parsed) ? '' : parsed;
-              cellDiv.textContent = newVal !== '' ? formatNumberValue(newVal, col) : '';
+              renderNumberCell(cellDiv, newVal, col);
             } else {
               cellDiv.textContent = newVal;
             }
@@ -1797,15 +1831,18 @@ function showFilterConfigPopover(e, block, view) {
 
           const tagOptions = col.options || [];
           tagOptions.forEach(opt => {
-            const isSel = filter.value === opt;
-            select.innerHTML += `<option value="${opt}" ${isSel ? 'selected' : ''}>${escapeHTML(opt)}</option>`;
+            const optId = typeof opt === 'string' ? opt : (opt.id || opt.name);
+            const optName = typeof opt === 'string' ? opt : opt.name;
+            const isSel = filter.value === optId;
+            select.innerHTML += `<option value="${optId}" ${isSel ? 'selected' : ''}>${escapeHTML(optName)}</option>`;
           });
 
           if (tagOptions.length === 0) {
             select.innerHTML = '<option value="">タグ未登録</option>';
             filter.value = '';
-          } else if (!filter.value || !tagOptions.includes(filter.value)) {
-            filter.value = tagOptions[0];
+          } else if (!filter.value || !tagOptions.some(o => (typeof o === 'string' ? o : (o.id || o.name)) === filter.value)) {
+            const firstOpt = tagOptions[0];
+            filter.value = typeof firstOpt === 'string' ? firstOpt : (firstOpt.id || firstOpt.name);
           }
 
           select.addEventListener('change', () => {
@@ -2102,6 +2139,7 @@ function showColumnConfigPopover(e, block, col) {
           <option value="plain" ${col.numberFormat === 'plain' ? 'selected' : ''}>平文 (標準)</option>
           <option value="currency" ${col.numberFormat === 'currency' ? 'selected' : ''}>通貨 (¥値段)</option>
           <option value="percent" ${col.numberFormat === 'percent' ? 'selected' : ''}>パーセント (%)</option>
+          <option value="progress" ${col.numberFormat === 'progress' ? 'selected' : ''}>進捗バー (読了率など)</option>
           <option value="custom" ${col.numberFormat === 'custom' ? 'selected' : ''}>カスタム単位</option>
         </select>
         <input type="text" id="col-custom-unit-input" class="db-popover-input" style="width:100%; margin-top:4px; display: ${col.numberFormat === 'custom' ? 'block' : 'none'}; font-size:10px; padding:2px 4px;" value="${escapeHTML(col.customUnit || '')}" placeholder="単位 (例: 円, 個)">
@@ -2536,11 +2574,23 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
     tagOptions = col.options;
   }
 
-  // 1. 選択肢リスト
-  const listTitle = document.createElement('div');
-  listTitle.style = 'font-size:10px; color:var(--text-muted); font-weight:600; padding:4px 6px;';
-  listTitle.textContent = 'タグを選択';
-  popover.appendChild(listTitle);
+  // 1. 検索＆新規作成インプット
+  const searchWrapper = document.createElement('div');
+  searchWrapper.style = 'padding: 6px; display: flex; flex-direction: column; gap: 4px;';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.className = 'db-popover-input';
+  searchInput.placeholder = 'タグを検索または新規作成...';
+  searchInput.style.width = '100%';
+  searchWrapper.appendChild(searchInput);
+  popover.appendChild(searchWrapper);
+
+  // 選択肢リストのスクロールコンテナ
+  const optionsList = document.createElement('div');
+  optionsList.className = 'db-popover-options-list';
+  optionsList.style = 'max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;';
+  popover.appendChild(optionsList);
 
   // 選択なし（クリア）オプション
   const noneItem = document.createElement('div');
@@ -2553,8 +2603,10 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
     saveNotesToStorage();
     renderEditor();
   });
-  popover.appendChild(noneItem);
+  optionsList.appendChild(noneItem);
 
+  // 既存タグの生成
+  const items = [];
   tagOptions.forEach(opt => {
     const item = document.createElement('div');
     const isAct = currentVal === opt.id || currentVal === opt.name;
@@ -2568,44 +2620,92 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       saveNotesToStorage();
       renderEditor();
     });
-    popover.appendChild(item);
+    optionsList.appendChild(item);
+    items.push({ el: item, name: opt.name.toLowerCase(), opt });
+  });
+
+  // 「新規作成」表示用のダミー項目
+  const createNewItem = document.createElement('div');
+  createNewItem.className = 'db-popover-item';
+  createNewItem.style.display = 'none';
+  optionsList.appendChild(createNewItem);
+
+  // 検索・絞り込みロジック
+  const updateSearch = () => {
+    const q = searchInput.value.trim().toLowerCase();
+    let exactMatch = false;
+
+    items.forEach(item => {
+      if (!q) {
+        item.el.style.display = '';
+      } else if (item.name.includes(q)) {
+        item.el.style.display = '';
+        if (item.name === q) exactMatch = true;
+      } else {
+        item.el.style.display = 'none';
+      }
+    });
+
+    if (q) {
+      noneItem.style.display = 'none';
+      if (!exactMatch) {
+        createNewItem.style.display = '';
+        createNewItem.innerHTML = `<span style="font-size: 11px; color: var(--accent-primary); font-weight: 500;"><i class="fa-solid fa-plus" style="margin-right: 4px;"></i>「${escapeHTML(searchInput.value.trim())}」を作成する</span>`;
+      } else {
+        createNewItem.style.display = 'none';
+      }
+    } else {
+      noneItem.style.display = '';
+      createNewItem.style.display = 'none';
+    }
+  };
+
+  searchInput.addEventListener('input', updateSearch);
+
+  // Enterキーで選択または新規作成
+  searchInput.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Enter') {
+      evt.preventDefault();
+      evt.stopPropagation();
+      const val = searchInput.value.trim();
+      if (!val) return;
+
+      let found = tagOptions.find(o => o.name.toLowerCase() === val.toLowerCase() || o.id.toLowerCase() === val.toLowerCase());
+      if (!found) {
+        found = { id: val, name: val, color: getTagHashColor(val) };
+        tagOptions.push(found);
+        col.options = tagOptions;
+      }
+      block.properties.rows[rowIndex][colId] = found.name;
+      popover.remove();
+      saveNotesToStorage();
+      renderEditor();
+    }
+  });
+
+  // 「新規作成」項目のクリック処理
+  createNewItem.addEventListener('click', (evt) => {
+    evt.stopPropagation();
+    const val = searchInput.value.trim();
+    if (val) {
+      const found = { id: val, name: val, color: getTagHashColor(val) };
+      tagOptions.push(found);
+      col.options = tagOptions;
+      block.properties.rows[rowIndex][colId] = found.name;
+      popover.remove();
+      saveNotesToStorage();
+      renderEditor();
+    }
   });
 
   const divider = document.createElement('div');
   divider.className = 'db-popover-divider';
   popover.appendChild(divider);
 
-  // 2. 新規タグ入力
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'db-popover-input';
-  input.placeholder = '+ 新規タグ作成...';
-
-  input.addEventListener('keydown', (evt) => {
-    if (evt.key === 'Enter') {
-      evt.preventDefault();
-      evt.stopPropagation();
-      const val = input.value.trim();
-      if (val) {
-        // 重複チェック
-        let found = tagOptions.find(o => o.name === val || o.id === val);
-        if (!found) {
-          found = { id: val, name: val, color: getTagHashColor(val) };
-          tagOptions.push(found);
-          col.options = tagOptions;
-        }
-        block.properties.rows[rowIndex][colId] = found.name;
-        popover.remove();
-        saveNotesToStorage();
-        renderEditor();
-      }
-    }
-  });
-  popover.appendChild(input);
-
-  const divider2 = document.createElement('div');
-  divider2.className = 'db-popover-divider';
-  popover.appendChild(divider2);
+  // フォーカスを検索インプットに当てる
+  setTimeout(() => {
+    searchInput.focus();
+  }, 50);
 
   // 3. タグ管理セクション (色変更・並べ替え)
   const configTitle = document.createElement('div');
@@ -4526,18 +4626,179 @@ function parseDatePropertyValue(val) {
 }
 
 function formatNumberValue(val, col) {
-  const num = parseFloat(val);
+  let num;
+  
+  if (typeof val === 'string' && val.includes('/')) {
+    const parts = val.split('/');
+    if (parts.length === 2) {
+      const num1 = parseFloat(parts[0].trim());
+      const num2 = parseFloat(parts[1].trim());
+      if (!isNaN(num1) && !isNaN(num2) && num2 !== 0) {
+        num = Math.round((num1 / num2) * 100);
+      }
+    }
+  }
+  
+  if (num === undefined) {
+    num = parseFloat(val);
+  }
+  
   if (isNaN(num)) return val;
 
   const format = col ? (col.numberFormat || 'plain') : 'plain';
   if (format === 'currency') {
     return '¥' + num.toLocaleString('ja-JP');
-  } else if (format === 'percent') {
+  } else if (format === 'percent' || format === 'progress') {
     return num + '%';
   } else if (format === 'custom' && col.customUnit) {
     return num.toLocaleString('ja-JP') + col.customUnit;
   }
   return num.toLocaleString('ja-JP'); // デフォルトも3桁カンマ区切りにして美しく
+}
+
+// 数値セルの表示を描画するヘルパー
+function renderNumberCell(cellDiv, val, col) {
+  if (val === '' || val === undefined || val === null) {
+    cellDiv.innerHTML = '';
+    return;
+  }
+  
+  const format = col.numberFormat || 'plain';
+  if (format === 'progress') {
+    let pct = 0;
+    
+    if (typeof val === 'string' && val.includes('/')) {
+      const parts = val.split('/');
+      if (parts.length === 2) {
+        const num1 = parseFloat(parts[0].trim());
+        const num2 = parseFloat(parts[1].trim());
+        if (!isNaN(num1) && !isNaN(num2) && num2 !== 0) {
+          pct = Math.round((num1 / num2) * 100);
+        }
+      }
+    } else {
+      const num = parseFloat(val);
+      if (!isNaN(num)) {
+        pct = num;
+      }
+    }
+    
+    pct = Math.max(0, Math.min(100, pct));
+    
+    cellDiv.innerHTML = `
+      <div class="db-progress-cell" style="display: flex; align-items: center; gap: 8px; width: 100%; justify-content: flex-end; padding: 2px 4px; box-sizing: border-box;">
+        <div class="db-progress-bar-bg" style="flex: 1; height: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 4px; overflow: hidden; min-width: 40px; max-width: 120px;">
+          <div class="db-progress-bar-fill" style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, var(--accent-primary, #8b5cf6), var(--accent-secondary, #ec4899)); border-radius: 4px; transition: width 0.3s ease;"></div>
+        </div>
+        <span class="db-progress-text" style="font-size: 11px; font-weight: 600; color: var(--text-primary); min-width: 32px; text-align: right;">${pct}%</span>
+      </div>
+    `;
+  } else {
+    cellDiv.textContent = formatNumberValue(val, col);
+  }
+}
+
+// 進捗バーフォーマット用のインライン分数編集UIをセットアップするヘルパー
+function setupProgressInlineEdit(cellDiv, row, col, table, block, rowDataList) {
+  const currentVal = row[col.id] !== undefined ? String(row[col.id]) : '';
+  let numerator = '';
+  let denominator = '';
+
+  if (currentVal.includes('/')) {
+    const parts = currentVal.split('/');
+    if (parts.length === 2) {
+      numerator = parts[0].trim();
+      denominator = parts[1].trim();
+    }
+  } else if (currentVal !== '') {
+    numerator = currentVal;
+    denominator = '100'; // デフォルト分母
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'db-progress-edit-wrapper';
+  wrapper.style = 'display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; width: 100%;';
+
+  const inputNum = document.createElement('input');
+  inputNum.type = 'text';
+  inputNum.value = numerator;
+  inputNum.placeholder = '現在';
+  inputNum.style = 'width: 38px; text-align: center; font-size: 11px; padding: 2px; border: 1px solid var(--accent-primary); border-radius: 4px; background: rgba(0,0,0,0.5); color: #fff; outline: none; box-sizing: border-box;';
+
+  const slashSpan = document.createElement('span');
+  slashSpan.textContent = '/';
+  slashSpan.style = 'font-size: 11px; color: var(--text-secondary); font-weight: bold;';
+
+  const inputDen = document.createElement('input');
+  inputDen.type = 'text';
+  inputDen.value = denominator;
+  inputDen.placeholder = '全体';
+  inputDen.style = 'width: 38px; text-align: center; font-size: 11px; padding: 2px; border: 1px solid var(--accent-primary); border-radius: 4px; background: rgba(0,0,0,0.5); color: #fff; outline: none; box-sizing: border-box;';
+
+  wrapper.appendChild(inputNum);
+  wrapper.appendChild(slashSpan);
+  wrapper.appendChild(inputDen);
+
+  cellDiv.innerHTML = '';
+  cellDiv.appendChild(wrapper);
+
+  inputNum.focus();
+  inputNum.select();
+
+  let isSaved = false;
+  const saveProgressValue = () => {
+    if (isSaved) return;
+    isSaved = true;
+
+    const valNum = inputNum.value.trim();
+    const valDen = inputDen.value.trim();
+
+    let finalVal = '';
+    if (valNum !== '' && valDen !== '') {
+      const n = parseFloat(valNum);
+      const d = parseFloat(valDen);
+      if (!isNaN(n) && !isNaN(d) && d !== 0) {
+        finalVal = `${n}/${d}`;
+      }
+    } else if (valNum !== '') {
+      const n = parseFloat(valNum);
+      if (!isNaN(n)) {
+        finalVal = n;
+      }
+    }
+
+    row[col.id] = finalVal;
+    saveNotesToStorage();
+    renderNumberCell(cellDiv, finalVal, col);
+    recalculateTableFooter(table, block, rowDataList);
+  };
+
+  const handleBlur = () => {
+    // 次のフォーカス先がもう一つの入力フィールドであるかを時間差でチェック
+    setTimeout(() => {
+      if (document.activeElement !== inputNum && document.activeElement !== inputDen) {
+        saveProgressValue();
+      }
+    }, 10);
+  };
+
+  inputNum.addEventListener('blur', handleBlur);
+  inputDen.addEventListener('blur', handleBlur);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveProgressValue();
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      isSaved = true;
+      renderNumberCell(cellDiv, row[col.id], col);
+    }
+  };
+
+  inputNum.addEventListener('keydown', handleKeyDown);
+  inputDen.addEventListener('keydown', handleKeyDown);
 }
 
 function formatDatePropertyValueForDisplay(val, col = null) {
@@ -6286,6 +6547,10 @@ function renderChartViewDOM(block, rowDataList) {
     const outerRadius = 80;
     const innerRadius = 55;
 
+    // ドーナツグラフ의 凡例の数に合わせてSVGの高さを自動拡張
+    const svgHeight = Math.max(320, 80 + donutData.length * 40 + 20);
+    svg.setAttribute('height', svgHeight.toString());
+
     let accumulatedAngle = -Math.PI / 2;
     const legends = [];
 
@@ -6346,9 +6611,9 @@ function renderChartViewDOM(block, rowDataList) {
 
     const centerText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     centerText.setAttribute('x', centerX);
-    centerText.setAttribute('y', centerY - 4);
+    centerText.setAttribute('y', centerY - 8);
     centerText.setAttribute('fill', 'var(--text-secondary)');
-    centerText.setAttribute('font-size', '10px');
+    centerText.setAttribute('font-size', '20px');
     centerText.setAttribute('font-weight', '600');
     centerText.setAttribute('text-anchor', 'middle');
     centerText.textContent = '合計';
@@ -6356,9 +6621,9 @@ function renderChartViewDOM(block, rowDataList) {
 
     const sumValText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     sumValText.setAttribute('x', centerX);
-    sumValText.setAttribute('y', centerY + 14);
+    sumValText.setAttribute('y', centerY + 20);
     sumValText.setAttribute('fill', '#fff');
-    sumValText.setAttribute('font-size', '13px');
+    sumValText.setAttribute('font-size', '26px');
     sumValText.setAttribute('font-weight', '800');
     sumValText.setAttribute('text-anchor', 'middle');
     sumValText.textContent = formatChartValue(totalSum, yCol);
@@ -6368,22 +6633,22 @@ function renderChartViewDOM(block, rowDataList) {
     const legendYStart = 80;
 
     legends.forEach((leg, legIdx) => {
-      const legY = legendYStart + legIdx * 22;
+      const legY = legendYStart + legIdx * 40;
 
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rect.setAttribute('x', legendX);
-      rect.setAttribute('y', legY - 8);
-      rect.setAttribute('width', '12');
-      rect.setAttribute('height', '12');
-      rect.setAttribute('rx', '3');
+      rect.setAttribute('y', legY - 16);
+      rect.setAttribute('width', '24');
+      rect.setAttribute('height', '24');
+      rect.setAttribute('rx', '6');
       rect.setAttribute('fill', leg.color);
       svg.appendChild(rect);
 
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', legendX + 20);
-      text.setAttribute('y', legY + 2);
+      text.setAttribute('x', legendX + 36);
+      text.setAttribute('y', legY + 4);
       text.setAttribute('fill', 'var(--text-primary)');
-      text.setAttribute('font-size', '11px');
+      text.setAttribute('font-size', '22px');
       text.setAttribute('font-weight', '600');
 
       const displayLabel = leg.label.length > 15 ? leg.label.substring(0, 14) + '..' : leg.label;
@@ -6391,10 +6656,10 @@ function renderChartViewDOM(block, rowDataList) {
       svg.appendChild(text);
 
       const valText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      valText.setAttribute('x', legendX + 150);
-      valText.setAttribute('y', legY + 2);
+      valText.setAttribute('x', legendX + 260);
+      valText.setAttribute('y', legY + 4);
       valText.setAttribute('fill', 'var(--text-secondary)');
-      valText.setAttribute('font-size', '10px');
+      valText.setAttribute('font-size', '20px');
       valText.setAttribute('text-anchor', 'end');
       valText.textContent = `${leg.percentage}% (${formatChartValue(leg.value, yCol)})`;
       svg.appendChild(valText);

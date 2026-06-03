@@ -40,6 +40,22 @@ export function loadPomodoroData() {
 
   timerVolume = parseFloat(localStorage.getItem("pomodoro_standalone_volume") || "0.5");
 
+  // 1.5秒などのテストデータのクリーンアップ (強化版)
+  let needsSave = false;
+  if (Array.isArray(sets) && sets.length > 0) {
+    const originalLength = sets.length;
+    sets = sets.filter(s => s.work >= 10000 && !(s.name && s.name.includes("1.5")));
+    if (sets.length !== originalLength) needsSave = true;
+  }
+  if (Array.isArray(schedule) && schedule.length > 0) {
+    const originalLength = schedule.length;
+    schedule = schedule.filter(s => s.work >= 10000 && !(s.name && s.name.includes("1.5")));
+    if (schedule.length !== originalLength) needsSave = true;
+  }
+  if (needsSave) {
+    savePomodoroData();
+  }
+
   // Prepopulate standard Pomodoro configurations if completely empty
   if (!Array.isArray(sets) || sets.length === 0) {
     sets = [
@@ -302,6 +318,10 @@ export function renderPomodoro() {
 
   // Update timer display states
   if (!isRunning && schedule[index]) {
+    const card = document.getElementById("pomodoro-timer-card");
+    if (card) {
+      card.classList.remove("status-work", "status-break");
+    }
     document.getElementById("currentIndex").textContent = `${index + 1}/${schedule.length}`;
     document.getElementById("taskName").textContent = `${index + 1}. ${schedule[index].name}`;
     const initialRem = isWork ? schedule[index].work : schedule[index].rest;
@@ -341,6 +361,17 @@ function run() {
   remaining = duration;
   endTime = Date.now() + duration;
   lastSec = Math.ceil(duration / 1000);
+
+  const card = document.getElementById("pomodoro-timer-card");
+  if (card) {
+    if (isWork) {
+      card.classList.add("status-work");
+      card.classList.remove("status-break");
+    } else {
+      card.classList.add("status-break");
+      card.classList.remove("status-work");
+    }
+  }
 
   document.getElementById("currentIndex").textContent = `${index + 1}/${schedule.length}`;
   document.getElementById("taskName").textContent = `${index + 1}. ${s.name} (${isWork ? '作業中' : '休憩中'})`;
@@ -416,6 +447,12 @@ export function stopTimer() {
   isPaused = false;
   index = 0;
   isWork = true; // reset
+
+  const card = document.getElementById("pomodoro-timer-card");
+  if (card) {
+    card.classList.remove("status-work", "status-break");
+  }
+
   renderPomodoro();
 }
 
