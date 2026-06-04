@@ -2246,6 +2246,17 @@ svg#cumulative-chart {
   color: var(--accent-primary);
 }
 
+.db-select-filter-dropdown {
+  width: 90px;
+  min-width: 90px;
+  max-width: 90px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  justify-content: center;
+  margin: 0 4px;
+}
+
 /* 5. Custom status config styling inside Popover */
 .db-status-config-row {
   display: flex;
@@ -3688,4 +3699,92 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ==========================================
+   IMAGE BLOCK STYLE ADDITIONS
+   ========================================== */
+.block-image-wrapper {
+  padding: 6px 0 6px 68px !important;
+}
+
+.image-block-container {
+  position: relative;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border-light);
+  display: inline-block;
+  vertical-align: top;
+}
+
+.image-uploader {
+  border: 2px dashed rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  padding: 32px 20px !important;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.25) !important;
+  cursor: pointer;
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.image-uploader:hover {
+  border-color: var(--accent-primary) !important;
+  background: rgba(139, 92, 246, 0.05) !important;
+}
+
+.image-url-input {
+  background: rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid var(--border-light) !important;
+  border-radius: 6px !important;
+  color: var(--text-primary) !important;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.image-url-input:focus {
+  border-color: var(--accent-primary) !important;
+}
+
+.image-block-container:hover .image-block-controls {
+  opacity: 1 !important;
+}
+
+/* 外部リンクのプレミアムデザイン */
+.external-link {
+  color: #c084fc !important; /* 明るいパープル */
+  text-decoration: none !important;
+  border-bottom: 1px dashed rgba(192, 132, 252, 0.4) !important;
+  transition: all 0.2s ease !important;
+  cursor: pointer !important;
+  display: inline-block;
+}
+
+.external-link:hover {
+  color: #f472b6 !important; /* ホバーでピンク */
+  border-bottom: 1px solid #f472b6 !important;
+}
+
+.external-link::after {
+  content: " ↗";
+  font-size: 0.85em;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+
+/* 編集中の外部リンクのプレミアムデザイン */
+.external-link-edit {
+  background: rgba(251, 191, 36, 0.08) !important;
+  border: 1px solid rgba(251, 191, 36, 0.3) !important;
+  border-radius: 4px !important;
+  padding: 0 4px !important;
+  color: #fbbf24 !important; /* オレンジ・黄色系で編集中であることを強調 */
+  font-family: var(--font-code, monospace) !important;
+  font-size: 0.95em !important;
+  display: inline-block;
 }

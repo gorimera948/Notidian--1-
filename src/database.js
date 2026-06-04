@@ -570,6 +570,142 @@ export function createDatabaseDOM(block) {
   });
   toolbar.appendChild(filterBtn);
 
+  // フィルターとグループ分けの間のセレクトタグ用プルダウン（常時表示、幅90px固定のボタンに変更）
+  const dbColumns = block.properties.columns || [];
+  const selectFilter = activeView.filters ? activeView.filters.find(f => {
+    const col = dbColumns.find(c => c.id === f.columnId);
+    return col && col.type === 'select';
+  }) : null;
+
+  const tagFilterDropdownBtn = document.createElement('button');
+  tagFilterDropdownBtn.className = 'btn-db-toolbar db-select-filter-dropdown';
+
+  if (selectFilter) {
+    const col = dbColumns.find(c => c.id === selectFilter.columnId);
+    if (col) {
+      tagFilterDropdownBtn.style.pointerEvents = 'auto';
+      tagFilterDropdownBtn.style.opacity = '1';
+      tagFilterDropdownBtn.title = `${col.name}フィルターの値を切り替え`;
+      
+      const currentVal = selectFilter.value || '';
+      // 表示用のラベル
+      let displayLabel = '';
+      if (currentVal) {
+        const tagOptions = col.options || [];
+        const currentVals = currentVal.split(',').map(v => v.trim()).filter(Boolean);
+        const names = currentVals.map(val => {
+          const found = tagOptions.find(o => (typeof o === 'string' ? o : (o.id || o.name)) === val);
+          return found ? (typeof found === 'string' ? found : found.name) : val;
+        });
+        displayLabel = names.join(', ');
+      } else {
+        displayLabel = '選択なし';
+      }
+      tagFilterDropdownBtn.textContent = displayLabel;
+
+      tagFilterDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+
+        const existing = document.querySelectorAll('.db-floating-popover');
+        existing.forEach(p => p.remove());
+
+        const popover = document.createElement('div');
+        popover.className = 'db-floating-popover db-select-multi-filter-popover';
+        
+        const rect = tagFilterDropdownBtn.getBoundingClientRect();
+        popover.style.left = `${rect.left}px`;
+        popover.style.top = `${rect.bottom + window.scrollY + 4}px`;
+        popover.style.width = '180px';
+        popover.style.maxHeight = '250px';
+        popover.style.overflowY = 'auto';
+        popover.style.display = 'flex';
+        popover.style.flexDirection = 'column';
+        popover.style.gap = '4px';
+        popover.style.padding = '6px';
+
+        popover.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+        });
+        popover.addEventListener('mousedown', (evt) => {
+          evt.stopPropagation();
+        });
+        popover.addEventListener('mouseup', (evt) => {
+          evt.stopPropagation();
+        });
+
+        const tagOptions = col.options || [];
+        const currentVals = currentVal.split(',').map(v => v.trim()).filter(Boolean);
+
+        if (tagOptions.length === 0) {
+          const emptyItem = document.createElement('div');
+          emptyItem.style = 'font-size: 11px; color: var(--text-muted); padding: 6px; text-align: center;';
+          emptyItem.textContent = 'タグ未登録';
+          popover.appendChild(emptyItem);
+        } else {
+          tagOptions.forEach(opt => {
+            const optId = typeof opt === 'string' ? opt : (opt.id || opt.name);
+            const optName = typeof opt === 'string' ? opt : opt.name;
+            const color = typeof opt === 'string' ? 'gray' : (opt.color || 'gray');
+            const isChecked = currentVals.includes(optId) || currentVals.includes(optName);
+
+            const item = document.createElement('div');
+            item.className = 'db-popover-item';
+            item.style = 'display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: pointer;';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = isChecked;
+            checkbox.style = 'margin: 0; cursor: pointer;';
+
+            const badge = document.createElement('span');
+            badge.className = `db-select-badge db-tag-${color}`;
+            badge.textContent = optName;
+            badge.style.cursor = 'pointer';
+
+            item.addEventListener('click', (evt) => {
+              evt.stopPropagation();
+              checkbox.checked = !checkbox.checked;
+              checkbox.dispatchEvent(new Event('change'));
+            });
+
+            checkbox.addEventListener('click', (evt) => {
+              evt.stopPropagation();
+            });
+
+            checkbox.addEventListener('change', () => {
+              const checkedItems = [];
+              popover.querySelectorAll('input[type="checkbox"]').forEach((cb, idx) => {
+                if (cb.checked) {
+                  const targetOpt = tagOptions[idx];
+                  const targetId = typeof targetOpt === 'string' ? targetOpt : (targetOpt.id || targetOpt.name);
+                  checkedItems.push(targetId);
+                }
+              });
+              selectFilter.value = checkedItems.join(',');
+              saveNotesToStorage();
+              // レンダリング遅延（ゴーストクリック対策）
+              setTimeout(() => {
+                renderEditor();
+              }, 0);
+            });
+
+            item.appendChild(checkbox);
+            item.appendChild(badge);
+            popover.appendChild(item);
+          });
+        }
+
+        document.body.appendChild(popover);
+      });
+    }
+  } else {
+    tagFilterDropdownBtn.style.pointerEvents = 'none';
+    tagFilterDropdownBtn.style.opacity = '0.5';
+    tagFilterDropdownBtn.textContent = '選択なし';
+  }
+
+  toolbar.appendChild(tagFilterDropdownBtn);
+
   // グループ化ボタン
   const isGrouped = block.properties.groupBy === 'col-status';
   const groupBtn = document.createElement('button');
@@ -583,21 +719,7 @@ export function createDatabaseDOM(block) {
   });
   toolbar.appendChild(groupBtn);
 
-  // CSV export button
-  const exportCsvBtn = document.createElement('button');
-  exportCsvBtn.className = 'btn-db-toolbar';
-  exportCsvBtn.innerHTML = '<i class="fa-solid fa-file-export"></i> CSVエクスポート';
-  exportCsvBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    exportToCSV(block);
-  });
-  toolbar.appendChild(exportCsvBtn);
-
-  // CSV import button
-  const importCsvBtn = document.createElement('button');
-  importCsvBtn.className = 'btn-db-toolbar';
-  importCsvBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> CSVインポート';
-
+  // CSV Menu (Import / Export Dropdown)
   const csvFileInput = document.createElement('input');
   csvFileInput.type = 'file';
   csvFileInput.accept = '.csv';
@@ -608,13 +730,51 @@ export function createDatabaseDOM(block) {
       importFromCSV(block, file);
     }
   });
-
-  importCsvBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    csvFileInput.click();
-  });
-  toolbar.appendChild(importCsvBtn);
   toolbar.appendChild(csvFileInput);
+
+  const csvMenuBtn = document.createElement('button');
+  csvMenuBtn.className = 'btn-db-toolbar';
+  csvMenuBtn.innerHTML = '<i class="fa-solid fa-file-csv"></i> CSV操作 <i class="fa-solid fa-chevron-down" style="font-size: 8px; margin-left: 4px;"></i>';
+  csvMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    
+    // 他のポップオーバーをクリア
+    const existing = document.querySelectorAll('.db-floating-popover');
+    existing.forEach(p => p.remove());
+
+    const popover = document.createElement('div');
+    popover.className = 'db-floating-popover';
+    popover.style.width = '155px';
+    popover.style.left = `${e.clientX}px`;
+    popover.style.top = `${e.clientY + 12}px`;
+
+    // エクスポート項目
+    const exportItem = document.createElement('div');
+    exportItem.className = 'db-popover-item';
+    exportItem.style.whiteSpace = 'nowrap';
+    exportItem.innerHTML = '<i class="fa-solid fa-file-export" style="width:14px;"></i> CSVエクスポート';
+    exportItem.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      popover.remove();
+      exportToCSV(block);
+    });
+    popover.appendChild(exportItem);
+
+    // インポート項目
+    const importItem = document.createElement('div');
+    importItem.className = 'db-popover-item';
+    importItem.style.whiteSpace = 'nowrap';
+    importItem.innerHTML = '<i class="fa-solid fa-file-import" style="width:14px;"></i> CSVインポート';
+    importItem.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      popover.remove();
+      csvFileInput.click();
+    });
+    popover.appendChild(importItem);
+
+    document.body.appendChild(popover);
+  });
+  toolbar.appendChild(csvMenuBtn);
 
   // delete database button
   const deleteDbBtn = document.createElement('button');
@@ -643,30 +803,7 @@ export function createDatabaseDOM(block) {
   });
   toolbar.appendChild(deleteDbBtn);
 
-  // AND フィルター詳細表示
-  if (activeView.filters && activeView.filters.length > 0) {
-    const filterLabels = [];
-    activeView.filters.forEach(filter => {
-      const col = block.properties.columns.find(c => c.id === filter.columnId);
-      if (col && filter.value !== undefined && filter.value !== '') {
-        // ステータスの場合はバッジ名を表示
-        let displayVal = filter.value;
-        if (col.type === 'status') {
-          displayVal = getStatusOptionName(col, filter.value);
-        }
-        filterLabels.push(`「${escapeHTML(col.name)}」＝「${escapeHTML(displayVal)}」`);
-      }
-    });
-    if (filterLabels.length > 0) {
-      const filterLabelSpan = document.createElement('span');
-      filterLabelSpan.style.fontSize = '11px';
-      filterLabelSpan.style.color = 'var(--accent-primary)';
-      filterLabelSpan.style.fontWeight = '600';
-      filterLabelSpan.style.marginRight = '8px';
-      filterLabelSpan.innerHTML = `<i class="fa-solid fa-filter"></i> ${filterLabels.join(' & ')}`;
-      toolbar.appendChild(filterLabelSpan);
-    }
-  }
+
 
   container.appendChild(toolbar);
 
@@ -689,7 +826,38 @@ export function createDatabaseDOM(block) {
           return name === filterVal || val === filterVal;
         }
         if (col.type === 'select') {
-          return val === filterVal;
+          const tagOptions = col.options || [];
+          const getTagName = (idOrName) => {
+            const found = tagOptions.find(o => {
+              const oid = typeof o === 'string' ? o : (o.id || o.name);
+              const oname = typeof o === 'string' ? o : o.name;
+              return oid.toLowerCase() === idOrName.toLowerCase() || oname.toLowerCase() === idOrName.toLowerCase();
+            });
+            return found ? (typeof found === 'string' ? found : found.name) : idOrName;
+          };
+          const getTagId = (idOrName) => {
+            const found = tagOptions.find(o => {
+              const oid = typeof o === 'string' ? o : (o.id || o.name);
+              const oname = typeof o === 'string' ? o : o.name;
+              return oid.toLowerCase() === idOrName.toLowerCase() || oname.toLowerCase() === idOrName.toLowerCase();
+            });
+            return found ? (typeof found === 'string' ? found : (found.id || found.name)) : idOrName;
+          };
+
+          const valLower = String(val || '').trim().toLowerCase();
+          const valName = getTagName(valLower).trim().toLowerCase();
+          const valId = getTagId(valLower).trim().toLowerCase();
+
+          const filterVals = typeof filterVal === 'string' ? filterVal.split(',').map(t => t.trim().toLowerCase()) : [];
+          if (filterVals.length === 0) return true;
+
+          return filterVals.some(fVal => {
+            const fName = getTagName(fVal).trim().toLowerCase();
+            const fId = getTagId(fVal).trim().toLowerCase();
+            return valLower === fVal || valName === fVal || valId === fVal || 
+                   valLower === fName || valName === fName || valId === fName || 
+                   valLower === fId || valName === fId || valId === fId;
+          });
         }
         if (col.type === 'checkbox') {
           const boolFilterVal = (filterVal === 'ON' || filterVal === 'true' || filterVal === true);
@@ -903,6 +1071,8 @@ export function createDatabaseDOM(block) {
       container.appendChild(flatTableWrapper);
     }
   }
+
+
 
   return container;
 }
@@ -1878,7 +2048,7 @@ function showFilterConfigPopover(e, block, view) {
 
           // ドロップダウンリストの作成
           const list = document.createElement('div');
-          list.style = 'position: absolute; left: 0; right: 0; top: 100%; max-height: 150px; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; z-index: 10000; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); padding: 4px; flex-direction: column; gap: 2px;';
+          list.style = 'position: absolute; left: 0; right: 0; top: 100%; max-height: 150px; overflow-y: auto; background: rgba(15, 20, 35, 0.98); border: 1px solid var(--border-light); border-radius: 4px; z-index: 10000; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); padding: 4px; flex-direction: column; gap: 2px;';
 
           // リストの項目を生成
           const renderListItems = (query = '') => {
@@ -1911,6 +2081,7 @@ function showFilterConfigPopover(e, block, view) {
                 input.value = optName;
                 filter.value = optId;
                 list.style.display = 'none';
+                popover.remove(); // 決定と同時にポップオーバーを閉じる
                 saveNotesToStorage();
                 renderEditor();
               });
@@ -2022,6 +2193,17 @@ function showFilterConfigPopover(e, block, view) {
         filter.columnId = colSelect.value;
         filter.value = ''; // 値リセット
         renderValControl(colSelect.value);
+
+        // セレクトタグ列が選択された場合、入力欄に自動フォーカスしてリストを展開する
+        const targetCol = columns.find(c => c.id === colSelect.value);
+        if (targetCol && targetCol.type === 'select') {
+          const input = valContainer.querySelector('.db-filter-val-input');
+          if (input) {
+            setTimeout(() => {
+              input.focus();
+            }, 50);
+          }
+        }
       });
 
       // 3. 個別削除ボタン
@@ -2977,17 +3159,7 @@ function showCalcOptionsPopover(e, block, col, calcTd, rowDataList = null) {
 
 // ドキュメント全体をクリックしたときにフローティングメニューを閉じる
 document.addEventListener('click', (e) => {
-  if (
-    !e.target.closest('.db-floating-popover') &&
-    !e.target.closest('.db-header-content') &&
-    !e.target.closest('.db-select-badge') &&
-    !e.target.closest('.db-status-todo') &&
-    !e.target.closest('.db-status-progress') &&
-    !e.target.closest('.db-status-complete') &&
-    !e.target.closest('.db-calc-cell') &&
-    !e.target.closest('.db-view-tab') &&
-    !e.target.closest('.btn-db-toolbar')
-  ) {
+  if (!e.target.closest('.db-floating-popover')) {
     const popovers = document.querySelectorAll('.db-floating-popover');
     popovers.forEach(p => p.remove());
   }
@@ -4219,6 +4391,217 @@ function updateBulkActionBar(block, rowDataList = null) {
     renderEditor();
   });
   container.appendChild(cloneBtn);
+
+  // --- 3. プロパティ一括設定 ---
+  const bulkPropBtn = document.createElement('button');
+  bulkPropBtn.className = 'btn-bulk-action';
+  bulkPropBtn.style.background = 'rgba(16, 185, 129, 0.18)';
+  bulkPropBtn.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+  bulkPropBtn.style.color = 'var(--text-primary)';
+  bulkPropBtn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> プロパティ一括設定';
+  bulkPropBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showBulkPropertySetterPopover(e, block);
+  });
+  container.appendChild(bulkPropBtn);
+}
+
+function showBulkPropertySetterPopover(e, block) {
+  // 他のポップオーバーをクリア
+  const existing = document.querySelectorAll('.db-floating-popover');
+  existing.forEach(p => p.remove());
+
+  const popover = document.createElement('div');
+  popover.className = 'db-floating-popover db-bulk-prop-popover';
+  popover.style.width = '240px';
+  popover.style.padding = '12px';
+  popover.style.display = 'flex';
+  popover.style.flexDirection = 'column';
+  popover.style.gap = '8px';
+  popover.style.left = `${e.clientX}px`;
+  popover.style.top = `${e.clientY - 240}px`; // 上方向に開く
+  if (e.clientY < 300) {
+    popover.style.top = `${e.clientY + 12}px`;
+  }
+
+  popover.addEventListener('click', (evt) => evt.stopPropagation());
+  popover.addEventListener('mousedown', (evt) => evt.stopPropagation());
+  popover.addEventListener('mouseup', (evt) => evt.stopPropagation());
+
+  const title = document.createElement('div');
+  title.style = 'font-weight: bold; font-size: 12px; margin-bottom: 4px; color: var(--text-primary);';
+  title.textContent = 'プロパティを一括設定';
+  popover.appendChild(title);
+
+  // 列選択セレクト
+  const colLabel = document.createElement('div');
+  colLabel.style = 'font-size: 11px; color: var(--text-muted);';
+  colLabel.textContent = '対象の列:';
+  popover.appendChild(colLabel);
+
+  const colSelect = document.createElement('select');
+  colSelect.className = 'db-popover-input';
+  colSelect.style = 'width: 100%; margin: 6px 0;';
+  
+  const columns = block.properties.columns || [];
+  columns.forEach(col => {
+    const opt = document.createElement('option');
+    opt.value = col.id;
+    opt.textContent = `${col.name} (${col.type})`;
+    colSelect.appendChild(opt);
+  });
+  popover.appendChild(colSelect);
+
+  // 値入力領域のコンテナ
+  const valContainer = document.createElement('div');
+  valContainer.style = 'display: flex; flex-direction: column; gap: 4px; margin-top: 4px;';
+  popover.appendChild(valContainer);
+
+  const renderValueInput = () => {
+    valContainer.innerHTML = '';
+    const selectedColId = colSelect.value;
+    const col = columns.find(c => c.id === selectedColId);
+    if (!col) return;
+
+    const valLabel = document.createElement('div');
+    valLabel.style = 'font-size: 11px; color: var(--text-muted);';
+    valLabel.textContent = '設定する値:';
+    valContainer.appendChild(valLabel);
+
+    if (col.type === 'status') {
+      const selectEl = document.createElement('select');
+      selectEl.className = 'db-popover-input';
+      selectEl.style = 'width: 100%; margin: 6px 0;';
+      const opts = col.options || [];
+      opts.forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt.name;
+        o.textContent = opt.name;
+        selectEl.appendChild(o);
+      });
+      valContainer.appendChild(selectEl);
+      popover.getValue = () => selectEl.value;
+    } 
+    else if (col.type === 'select') {
+      // 複数チェックボックス形式
+      const optsDiv = document.createElement('div');
+      optsDiv.style = 'max-height: 120px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 4px; padding: 4px; display: flex; flex-direction: column; gap: 4px; background: rgba(0, 0, 0, 0.4); color: #fff;';
+      const opts = col.options || [];
+      
+      if (opts.length === 0) {
+        const noOpt = document.createElement('div');
+        noOpt.style = 'font-size: 11px; color: var(--text-muted); padding: 4px; text-align: center;';
+        noOpt.textContent = 'オプションがありません';
+        optsDiv.appendChild(noOpt);
+      } else {
+        opts.forEach(opt => {
+          const optName = typeof opt === 'string' ? opt : opt.name;
+          const color = typeof opt === 'string' ? 'gray' : (opt.color || 'gray');
+
+          const label = document.createElement('label');
+          label.style = 'display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 3px;';
+          label.onmouseover = () => label.style.background = 'rgba(255,255,255,0.05)';
+          label.onmouseout = () => label.style.background = 'none';
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.value = optName; // optIdからoptNameに変更
+          cb.style = 'margin: 0; cursor: pointer;';
+          
+          const badge = document.createElement('span');
+          badge.className = `db-select-badge db-tag-${color}`;
+          badge.textContent = optName;
+
+          label.appendChild(cb);
+          label.appendChild(badge);
+          optsDiv.appendChild(label);
+        });
+      }
+      valContainer.appendChild(optsDiv);
+      popover.getValue = () => {
+        const checked = [];
+        optsDiv.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          if (cb.checked) checked.push(cb.value);
+        });
+        return checked.join(',');
+      };
+    } 
+    else if (col.type === 'checkbox') {
+      const selectEl = document.createElement('select');
+      selectEl.className = 'db-popover-input';
+      selectEl.style = 'width: 100%; margin: 6px 0;';
+      const optTrue = document.createElement('option');
+      optTrue.value = 'true';
+      optTrue.textContent = 'チェックあり (True)';
+      const optFalse = document.createElement('option');
+      optFalse.value = 'false';
+      optFalse.textContent = 'チェックなし (False)';
+      selectEl.appendChild(optTrue);
+      selectEl.appendChild(optFalse);
+      valContainer.appendChild(selectEl);
+      popover.getValue = () => selectEl.value === 'true';
+    } 
+    else if (col.type === 'date') {
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.className = 'db-popover-input';
+      input.style = 'width: 100%; margin: 6px 0;';
+      valContainer.appendChild(input);
+      popover.getValue = () => input.value;
+    } 
+    else if (col.type === 'number') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'db-popover-input';
+      input.style = 'width: 100%; margin: 6px 0;';
+      input.placeholder = '数値を入力...';
+      valContainer.appendChild(input);
+      popover.getValue = () => input.value;
+    } 
+    else {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'db-popover-input';
+      input.style = 'width: 100%; margin: 6px 0;';
+      input.placeholder = 'テキストを入力...';
+      valContainer.appendChild(input);
+      popover.getValue = () => input.value;
+    }
+  };
+
+  colSelect.addEventListener('change', renderValueInput);
+  renderValueInput();
+
+  const btnDiv = document.createElement('div');
+  btnDiv.style = 'display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.style = 'padding: 4px 8px; font-size: 11px; border: 1px solid var(--border-light); background: none; color: var(--text-secondary); border-radius: 4px; cursor: pointer;';
+  cancelBtn.textContent = 'キャンセル';
+  cancelBtn.addEventListener('click', () => popover.remove());
+  btnDiv.appendChild(cancelBtn);
+
+  const applyBtn = document.createElement('button');
+  applyBtn.style = 'padding: 4px 8px; font-size: 11px; border: none; background: var(--accent-secondary, #ec4899); color: white; border-radius: 4px; cursor: pointer; font-weight: bold;';
+  applyBtn.textContent = '適用';
+  applyBtn.addEventListener('click', () => {
+    const val = popover.getValue();
+    const colId = colSelect.value;
+
+    pushHistory();
+    tableSelection.selectedRows.forEach(row => {
+      row[colId] = val;
+    });
+
+    saveNotesToStorage();
+    clearTableSelection();
+    popover.remove();
+    renderEditor();
+  });
+  btnDiv.appendChild(applyBtn);
+  popover.appendChild(btnDiv);
+
+  document.body.appendChild(popover);
 }
 
 // ==========================================
@@ -4337,10 +4720,28 @@ export function insertPomodoroStartToActiveTable(taskName, durationMs) {
       newRow[col.id] = progressOpt ? progressOpt.id : '進行中';
     } else if (col.type === 'select') {
       if (!col.options) col.options = [];
-      if (!col.options.includes(taskName || '作業セッション')) {
-        col.options.push(taskName || '作業セッション');
+      const seen = new Set();
+      const uniqueOptions = [];
+      col.options.forEach(opt => {
+        let optObj = opt;
+        if (typeof opt === 'string') {
+          optObj = { id: opt, name: opt, color: getTagHashColor(opt) };
+        }
+        const normName = (optObj.name || '').trim().toLowerCase();
+        if (normName && !seen.has(normName)) {
+          seen.add(normName);
+          uniqueOptions.push(optObj);
+        }
+      });
+      col.options = uniqueOptions;
+
+      const tagName = (taskName || '作業セッション').trim();
+      let found = col.options.find(o => o.name.trim().toLowerCase() === tagName.toLowerCase());
+      if (!found) {
+        found = { id: tagName, name: tagName, color: 'gray' };
+        col.options.push(found);
       }
-      newRow[col.id] = taskName || '作業セッション';
+      newRow[col.id] = found.name;
     } else if (col.type === 'checkbox') {
       newRow[col.id] = false;
     } else {

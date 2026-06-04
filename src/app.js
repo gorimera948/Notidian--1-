@@ -169,7 +169,7 @@ function updateHistoryButtons() {
   }
 }
 
-// Intercept WikiLink clicks
+// Intercept WikiLink and ExternalLink clicks
 document.addEventListener('mousedown', (e) => {
   const wikiLinkEl = e.target.closest('.wiki-link');
   if (wikiLinkEl) {
@@ -187,6 +187,25 @@ document.addEventListener('mousedown', (e) => {
     e.stopPropagation();
     const targetTitle = wikiLinkEl.getAttribute('data-target');
     openOrCreateNoteByTitle(targetTitle);
+    return;
+  }
+
+  const extLinkEl = e.target.closest('.external-link');
+  if (extLinkEl) {
+    const activeEditable = document.activeElement;
+    const isEditingThisBlock = activeEditable && 
+                               activeEditable.isContentEditable && 
+                               activeEditable.contains(extLinkEl);
+
+    const shouldNavigate = !isEditingThisBlock || e.ctrlKey || e.metaKey;
+    if (shouldNavigate) {
+      e.preventDefault();
+      e.stopPropagation();
+      const href = extLinkEl.getAttribute('href');
+      if (href) {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
+    }
   }
 });
 
@@ -311,6 +330,16 @@ export function updateBacklinks() {
           return true;
         }
       }
+      if (b.type === 'database' && b.properties && b.properties.rows) {
+        for (let row of b.properties.rows) {
+          for (let key in row) {
+            const val = String(row[key] || '').toLowerCase();
+            if (val.includes(`[[${targetTitle}]]`) || val.includes(`「「${targetTitle}」」`)) {
+              return true;
+            }
+          }
+        }
+      }
       if (b.children && searchBlocksForTitle(b.children, targetTitle)) {
         return true;
       }
@@ -318,10 +347,14 @@ export function updateBacklinks() {
     return false;
   };
 
-  const referrers = getActiveNormalNotes().filter(note => {
-    if (note.id === activeNote.id) return false;
-    return searchBlocksForTitle(note.blocks, currentTitle);
+  const referrersMap = new Map();
+  getActiveNormalNotes().forEach(note => {
+    if (note.id === activeNote.id) return;
+    if (searchBlocksForTitle(note.blocks, currentTitle)) {
+      referrersMap.set(note.id, note);
+    }
   });
+  const referrers = Array.from(referrersMap.values());
 
   const outgoing = extractOutgoingLinks(activeNote);
 
@@ -370,25 +403,44 @@ export function updateBacklinks() {
 }
 
 function extractOutgoingLinks(note) {
-  const links = new Set();
+  const linksMap = new Map();
+
+  const checkTextForLinks = (text) => {
+    text.replace(/\[\[(.*?)\]\]/g, (m, target) => {
+      const tName = target.trim();
+      const targetNote = state.notes.find(n => n.title.toLowerCase() === tName.toLowerCase());
+      if (targetNote && targetNote.id !== note.id) {
+        linksMap.set(targetNote.id, targetNote);
+      }
+    }).replace(/「「(.*?)」」/g, (m, target) => {
+      const tName = target.trim();
+      const targetNote = state.notes.find(n => n.title.toLowerCase() === tName.toLowerCase());
+      if (targetNote && targetNote.id !== note.id) {
+        linksMap.set(targetNote.id, targetNote);
+      }
+    });
+  };
+
   const searchBlocks = (blocksArray) => {
     blocksArray.forEach(b => {
       if (b.content) {
-        b.content.replace(/\[\[(.*?)\]\]/g, (m, target) => {
-          const tName = target.trim();
-          const targetNote = state.notes.find(n => n.title.toLowerCase() === tName.toLowerCase());
-          if (targetNote && targetNote.id !== note.id) links.add(targetNote);
-        }).replace(/「「(.*?)」」/g, (m, target) => {
-          const tName = target.trim();
-          const targetNote = state.notes.find(n => n.title.toLowerCase() === tName.toLowerCase());
-          if (targetNote && targetNote.id !== note.id) links.add(targetNote);
+        checkTextForLinks(b.content);
+      }
+      if (b.type === 'database' && b.properties && b.properties.rows) {
+        b.properties.rows.forEach(row => {
+          for (let key in row) {
+            const val = String(row[key] || '');
+            if (val) {
+              checkTextForLinks(val);
+            }
+          }
         });
       }
       if (b.children) searchBlocks(b.children);
     });
   };
   if (note.blocks) searchBlocks(note.blocks);
-  return Array.from(links);
+  return Array.from(linksMap.values());
 }
 
 export function renderNoteLinksPanel() {

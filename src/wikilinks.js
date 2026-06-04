@@ -7,6 +7,8 @@ import { escapeHTML } from './utils.js';
 export function serializeHtmlToWikiText(element) {
   if (!element) return '';
   const clone = element.cloneNode(true);
+  
+  // 1. WikiLink の逆パース
   const links = clone.querySelectorAll('.wiki-link');
   links.forEach(link => {
     const target = link.textContent || link.getAttribute('data-target') || '';
@@ -16,6 +18,23 @@ export function serializeHtmlToWikiText(element) {
     const textNode = document.createTextNode(`${open}${target}${close}`);
     link.parentNode.replaceChild(textNode, link);
   });
+
+  // 2. 外部リンクの逆パース
+  const extLinks = clone.querySelectorAll('.external-link');
+  extLinks.forEach(link => {
+    const label = link.textContent || '';
+    const url = link.getAttribute('href') || '';
+    const textNode = document.createTextNode(`[${label}](${url})`);
+    link.parentNode.replaceChild(textNode, link);
+  });
+
+  // 3. 編集中の外部リンクの逆パース
+  const extEditLinks = clone.querySelectorAll('.external-link-edit');
+  extEditLinks.forEach(link => {
+    const textNode = document.createTextNode(link.textContent);
+    link.parentNode.replaceChild(textNode, link);
+  });
+
   return clone.textContent;
 }
 
@@ -44,6 +63,12 @@ export function parseWikiLinks(htmlContent) {
 
   parsed = parsed.replace(WIKI_LINK_REGEX, replaceLink);
   parsed = parsed.replace(JP_LINK_REGEX, replaceLink);
+
+  // 外部リンクのパース [label](url) を <a> に変換
+  parsed = parsed.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, (match, label, url) => {
+    const decodedUrl = url.replace(/&amp;/g, '&');
+    return `<a class="external-link" href="${escapeHTML(decodedUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHTML(decodedUrl)}">${escapeHTML(label)}</a>`;
+  });
 
   return parsed;
 }

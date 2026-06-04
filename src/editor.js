@@ -550,6 +550,11 @@ export function createBlockDOM(block, parentBlock = null) {
 
   // Structural details based on block type
   if (block.type === 'toggle') {
+    // トグルの子要素が空または存在しない場合、最低でも1つの空段落を自動挿入する
+    if (!block.children || block.children.length === 0) {
+      block.children = [{ id: generateId(), type: 'p', content: '' }];
+    }
+
     const toggleContainer = document.createElement('div');
     toggleContainer.className = 'block-toggle-wrapper';
     toggleContainer.style.width = '100%';
@@ -1094,27 +1099,6 @@ function handleEditorKeydown(e, block, contentDiv) {
     const note = getActiveNote();
     const found = findBlockAndParent(note.blocks, block.id);
     if (!found) return;
-
-    // トグルブロックの本体でEnterを押した場合は、自動的にトグルの子要素（内側）に新しいブロックを挿入する
-    if (block.type === 'toggle') {
-      block.children = block.children || [];
-      const newBlock = { id: generateId(), type: 'p', content: '' };
-      block.children.unshift(newBlock); // 子要素の先頭に追加
-
-      // 自動でトグルを展開する
-      block.properties = block.properties || {};
-      block.properties.open = true;
-
-      saveNotesToStorage();
-      renderEditor();
-
-      // 新しい子要素にフォーカスを当てる
-      setTimeout(() => {
-        const nextEl = document.querySelector(`.block-content[data-id="${newBlock.id}"]`);
-        if (nextEl) focusBlock(nextEl);
-      }, 50);
-      return;
-    }
 
     // Create a new block below
     // Notion behavior: if we press Enter inside H1/H2, the next block should default to paragraph (p)
@@ -2027,9 +2011,22 @@ function handleBlockPaste(e, activeBlock, contentDiv, directText = null, directO
     clipboardText = e.clipboardData.getData('text/plain');
   }
 
+  const isUrlPaste = clipboardText && /^https?:\/\/[^\s]+$/.test(clipboardText.trim());
+
+  if (isUrlPaste) {
+    const url = clipboardText.trim();
+    const selection = window.getSelection();
+    let selectedText = '';
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      selectedText = selection.toString().trim();
+    }
+    const label = selectedText || url;
+    clipboardText = `[${label}](${url})`;
+  }
+
   if (!structuredBlocks && !clipboardText) return;
 
-  if (!structuredBlocks && directText === null && !clipboardText.includes('\n') && !clipboardText.includes('\r')) {
+  if (!structuredBlocks && directText === null && !isUrlPaste && !clipboardText.includes('\n') && !clipboardText.includes('\r')) {
     return;
   }
 
@@ -2876,6 +2873,35 @@ export function setupMultipleBlockSelectionShortcuts() {
     return fullText.substring(wikiOffset);
   }
 
+  function getBlockContentFromContainer(container, offset, isStart) {
+    if (!container) return null;
+    if (container.nodeType === Node.TEXT_NODE) {
+      return container.parentNode.closest('.block-content');
+    }
+    if (container.nodeType === Node.ELEMENT_NODE) {
+      const el = container.closest('.block-content');
+      if (el) return el;
+    }
+    if (container.childNodes && container.childNodes.length > 0) {
+      let targetNode = null;
+      if (isStart) {
+        const idx = Math.min(offset, container.childNodes.length - 1);
+        targetNode = container.childNodes[idx];
+      } else {
+        const idx = Math.max(0, Math.min(offset - 1, container.childNodes.length - 1));
+        targetNode = container.childNodes[idx];
+      }
+      if (targetNode && targetNode.nodeType === Node.ELEMENT_NODE) {
+        const el = targetNode.classList.contains('block-content') ? targetNode : targetNode.querySelector('.block-content');
+        if (el) return el;
+        const wrapperEl = targetNode.closest('.block-wrapper') || targetNode;
+        const subEl = wrapperEl.querySelector('.block-content');
+        if (subEl) return subEl;
+      }
+    }
+    return null;
+  }
+
   function getMultipleBlockSelectionRange() {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
@@ -2884,8 +2910,15 @@ export function setupMultipleBlockSelectionShortcuts() {
     const canvas = document.getElementById('block-canvas');
     if (!canvas || !canvas.contains(range.commonAncestorContainer)) return null;
 
-    const startEl = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentNode.closest('.block-content') : range.startContainer.closest('.block-content');
-    const endEl = range.endContainer.nodeType === Node.TEXT_NODE ? range.endContainer.parentNode.closest('.block-content') : range.endContainer.closest('.block-content');
+    let startEl = getBlockContentFromContainer(range.startContainer, range.startOffset, true);
+    let endEl = getBlockContentFromContainer(range.endContainer, range.endOffset, false);
+
+    if (!startEl) {
+      startEl = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentNode.closest('.block-content') : range.startContainer.closest('.block-content');
+    }
+    if (!endEl) {
+      endEl = range.endContainer.nodeType === Node.TEXT_NODE ? range.endContainer.parentNode.closest('.block-content') : range.endContainer.closest('.block-content');
+    }
 
     if (!startEl || !endEl) return null;
 
@@ -3289,5 +3322,115 @@ if (typeof window !== 'undefined') {
 }
 
 window.setupBlockCopyPasteShortcuts = setupBlockCopyPasteShortcuts;
+
+// 外部リンク（external-link）のインライン編集ハンドラ
+if (typeof window !== 'undefined') {
+  let isUpdatingDOM = false;
+
+  document.addEventListener('selectionchange', () => {
+    if (isUpdatingDOM) return;
+
+    const activeEl = document.activeElement;
+    if (!activeEl || !activeEl.classList.contains('block-content')) return;
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    const container = range.startContainer;
+
+    // 1. カーソルが .external-link に触れている場合の展開処理
+    let currentLink = null;
+    if (container.nodeType === Node.TEXT_NODE) {
+      currentLink = container.parentNode.closest('.external-link');
+    } else if (container.nodeType === Node.ELEMENT_NODE) {
+      currentLink = container.closest('.external-link');
+    }
+
+    if (currentLink && !isUpdatingDOM) {
+      isUpdatingDOM = true;
+      const label = currentLink.textContent || '';
+      const url = currentLink.getAttribute('href') || '';
+      
+      let offset = range.startOffset;
+      if (range.startContainer.nodeType !== Node.TEXT_NODE) {
+        offset = 0;
+      }
+
+      const editSpan = document.createElement('span');
+      editSpan.className = 'external-link-edit';
+      editSpan.setAttribute('data-href', url);
+      editSpan.textContent = `[${label}](${url})`;
+
+      const parent = currentLink.parentNode;
+      parent.replaceChild(editSpan, currentLink);
+
+      // カーソルを [分 (+1) 再配置
+      const newRange = document.createRange();
+      newRange.setStart(editSpan.firstChild, Math.min(offset + 1, editSpan.textContent.length));
+      newRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(newRange);
+      
+      // ブロック状態の同期
+      const note = getActiveNote();
+      if (note && typeof findBlockAndParent === 'function') {
+        const found = findBlockAndParent(note.blocks, state.activeFocusedBlockId);
+        if (found) {
+          found.block.content = serializeHtmlToWikiText(activeEl);
+        }
+      }
+
+      isUpdatingDOM = false;
+      return;
+    }
+
+    // 2. カーソルが .external-link-edit の外側に出た場合の復元処理
+    const editingLinks = activeEl.querySelectorAll('.external-link-edit');
+    editingLinks.forEach(editSpan => {
+      // カーソルがこのスパンの中に含まれているかチェック
+      const isCursorInside = range.intersectsNode(editSpan) || 
+                             (container.nodeType === Node.TEXT_NODE && container.parentNode === editSpan) ||
+                             (container === editSpan);
+
+      if (!isCursorInside && !isUpdatingDOM) {
+        isUpdatingDOM = true;
+        const text = editSpan.textContent;
+        // 正規表現で [label](url) を解析
+        const match = text.match(/^\[(.*?)\]\((https?:\/\/[^\s\)]+)\)$/);
+        if (match) {
+          const newLabel = match[1];
+          const newUrl = match[2];
+
+          const a = document.createElement('a');
+          a.className = 'external-link';
+          a.href = newUrl;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.title = newUrl;
+          a.textContent = newLabel;
+
+          editSpan.parentNode.replaceChild(a, editSpan);
+        } else {
+          // 形式が壊れた場合はプレーンテキストに戻す
+          const textNode = document.createTextNode(text);
+          editSpan.parentNode.replaceChild(textNode, editSpan);
+        }
+
+        // 同期
+        const note = getActiveNote();
+        if (note && typeof findBlockAndParent === 'function') {
+          const found = findBlockAndParent(note.blocks, state.activeFocusedBlockId);
+          if (found) {
+            found.block.content = serializeHtmlToWikiText(activeEl);
+            saveNotesToStorage();
+          }
+        }
+
+        isUpdatingDOM = false;
+      }
+    });
+  });
+}
 
 
