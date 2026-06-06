@@ -259,27 +259,35 @@ export class MindMap {
     // 1. クーロン反発力とタグクラスタリング引力の計算
     for (let i = 0; i < this.nodes.length; i++) {
       const n1 = this.nodes[i];
-      const tag1 = n1.tags && n1.tags[0] ? n1.tags[0].trim() : null;
+      const tags1 = (n1.tags || []).map(t => t.trim()).filter(t => t && t !== 'default');
       for (let j = i + 1; j < this.nodes.length; j++) {
         const n2 = this.nodes[j];
-        const tag2 = n2.tags && n2.tags[0] ? n2.tags[0].trim() : null;
+        const tags2 = (n2.tags || []).map(t => t.trim()).filter(t => t && t !== 'default');
         const dx = n2.x - n1.x;
         const dy = n2.y - n1.y;
         const distSq = dx * dx + dy * dy + 1;
         const dist = Math.sqrt(distSq);
         
-        const isSameTag = tag1 && tag2 && tag1 === tag2 && tag1 !== 'default';
-        // 離れすぎている場合は無視。ただし同じメインタグを持つ場合は引力を利かせるためスキップしない
-        if (dist > 180 && !isSameTag) continue;
+        // 共通する有効なタグがあるかチェック
+        const hasCommonTag = tags1.some(t => tags2.includes(t));
+        // 離れすぎている場合は無視。ただし共通のタグを持つ場合は引力を利かせるためスキップしない
+        if (dist > 180 && !hasCommonTag) continue;
+
+        // タグが重ならないようにするための異なるタググループ間の追加反発
+        let repulsion = REPULSION_STRENGTH;
+        if (tags1.length > 0 && tags2.length > 0 && !hasCommonTag) {
+          // 共通のタグが1つもない異なるグループ同士は反発力を強める (1.8倍)
+          repulsion = REPULSION_STRENGTH * 1.8;
+        }
 
         let force = 0;
         if (dist <= 180) {
-          force = REPULSION_STRENGTH / distSq;
+          force = repulsion / distSq;
         }
 
-        // 同じメインタグ同士を引き寄せる緩やかなクラスタリング引力を追加
-        if (isSameTag) {
-          const tagAttraction = dist * 0.012; // 緩やかな引力
+        // 共通するタグを持つノード同士を引き寄せる緩やかな引力を追加
+        if (hasCommonTag) {
+          const tagAttraction = dist * 0.016; // 緩やかな引力
           force -= tagAttraction;
         }
 
@@ -375,19 +383,30 @@ export class MindMap {
     this.ctx.restore();
   }
 
-  // 背景の色分け領域 (メインタグごとの重心・最大半径に基づくザックリしたエリア分け)
+  // 背景の色分け領域 (タグごとの重心・最大半径に基づくザックリしたエリア分け)
   drawTagRegions() {
     this.ctx.save();
     // ぼかしは無効化 (くっきりしたエリア分け)
 
-    // メインタグ（1番目のタグ）ごとにノードをグループ化
+    // 有効なタグごとにノードをグループ化 (1つのノードが複数タグを持つ場合、それぞれの円に所属)
     const groups = {};
     this.nodes.forEach(node => {
-      const mainTag = (node.tags && node.tags.length > 0) ? node.tags[0].trim() : 'default';
-      if (!groups[mainTag]) {
-        groups[mainTag] = [];
+      const validTags = (node.tags && node.tags.length > 0)
+        ? node.tags.map(t => t.trim()).filter(t => t && t !== 'default')
+        : ['default'];
+
+      if (validTags.length === 0) {
+        validTags.push('default');
       }
-      groups[mainTag].push(node);
+
+      validTags.forEach(tag => {
+        if (!groups[tag]) {
+          groups[tag] = [];
+        }
+        if (!groups[tag].includes(node)) {
+          groups[tag].push(node);
+        }
+      });
     });
 
     // 各グループの重心と半径を計算し描画
