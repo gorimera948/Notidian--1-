@@ -1,4 +1,4 @@
-import { state, getActiveNote, saveNotesToStorage, getActiveNormalNotes, pushHistory } from './state.js';
+import { state, getActiveNote, saveNotesToStorage, getActiveNormalNotes, pushHistory, historyState } from './state.js';
 import { generateId, escapeHTML, showToast, formatMS, getFormattedTime, getFormattedTimeFromMs } from './utils.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu } from './wikilinks.js';
 
@@ -1449,6 +1449,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
         cellDiv.addEventListener('blur', () => {
           // すでにDOMから取り除かれている古い要素なら、非同期の暴発によるデータ破壊を防ぐため無視する
           if (!document.body.contains(cellDiv)) return;
+          if (historyState.isApplying) return;
 
           // progress形式の場合は setupProgressInlineEdit 内部で保存と再描画を行うので、ここでは何もしない
           if (col.type === 'number' && col.numberFormat === 'progress') {
@@ -4207,7 +4208,7 @@ function updateBlockBulkActionBar() {
   }
 }
 
-function removeBlocksRecursively(blocks, targetIds) {
+export function removeBlocksRecursively(blocks, targetIds) {
   return blocks.filter(block => {
     if (targetIds.includes(block.id)) {
       return false; // 削除

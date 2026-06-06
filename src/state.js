@@ -29,7 +29,8 @@ export const state = {
   copiedBlocksData: null,
   lastActiveEditTarget: null,
   lastSelectedBlockId: null,
-  isComposing: false
+  isComposing: false,
+  customTagColors: {}
 };
 
 export const historyState = {
@@ -60,9 +61,66 @@ export function pushHistory() {
 }
 
 export function undo() {
-  // アンドゥ実行前に、現在編集中（フォーカスされている）要素があればその変更を強制確定（blur）させて同期する
-  if (document.activeElement && typeof document.activeElement.blur === 'function' && (document.activeElement.classList.contains('block-content') || document.activeElement.classList.contains('db-cell-edit'))) {
-    document.activeElement.blur();
+  // アンドゥ実行前に、現在編集中（フォーカスされている）要素があればその変更を同期的に強制適用してから blur させる
+  if (document.activeElement && (document.activeElement.classList.contains('block-content') || document.activeElement.classList.contains('db-cell-edit'))) {
+    const el = document.activeElement;
+    
+    // 履歴適用フラグをあらかじめ立てておくことで、blurによる非同期イベントの自動保存が履歴破壊することを防ぐ
+    historyState.isApplying = true;
+
+    try {
+      const activeNote = getActiveNote();
+      if (activeNote) {
+        if (el.classList.contains('block-content') && state.activeFocusedBlockId) {
+          if (window.Notidian && typeof window.Notidian.findBlockAndParent === 'function' && typeof window.Notidian.serializeHtmlToWikiText === 'function') {
+            const found = window.Notidian.findBlockAndParent(activeNote.blocks, state.activeFocusedBlockId);
+            if (found && found.block) {
+              found.block.content = window.Notidian.serializeHtmlToWikiText(el);
+            }
+          }
+        } else if (el.classList.contains('db-cell-edit')) {
+          const tr = el.closest('tr');
+          const td = el.closest('td');
+          const dbContainer = el.closest('.database-container');
+          const blockWrapper = dbContainer ? dbContainer.closest('.block-wrapper') : null;
+          const blockId = blockWrapper ? blockWrapper.getAttribute('data-id') : null;
+          
+          if (blockId && window.Notidian && typeof window.Notidian.findBlockAndParent === 'function' && typeof window.Notidian.serializeHtmlToWikiText === 'function') {
+            const found = window.Notidian.findBlockAndParent(activeNote.blocks, blockId);
+            if (found && found.block && found.block.properties && found.block.properties.rows) {
+              const rowIdx = Array.from(tr.parentNode.children).indexOf(tr);
+              const colId = td.getAttribute('data-col-id');
+              const row = found.block.properties.rows[rowIdx];
+              if (row && colId) {
+                const col = found.block.properties.columns.find(c => c.id === colId);
+                if (col) {
+                  let newVal;
+                  if (col.type === 'text' || !col.type) {
+                    newVal = window.Notidian.serializeHtmlToWikiText(el).trim();
+                  } else {
+                    newVal = el.textContent.trim();
+                    if (col.type === 'number') {
+                      const parsed = parseFloat(newVal);
+                      newVal = isNaN(parsed) ? '' : parsed;
+                    }
+                  }
+                  row[colId] = newVal;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to sync active element before undo:", e);
+    }
+
+    if (typeof el.blur === 'function') {
+      el.blur();
+    }
+    
+    // 一旦解除して、次の pushHistory で確実に今の状態を保存させる
+    historyState.isApplying = false;
   }
 
   // 現在の状態を確実にヒストリへ追加して同期
@@ -166,6 +224,17 @@ export function saveNotesToStorage() {
   localStorage.setItem('notidian_folders', JSON.stringify(state.folders));
   localStorage.setItem('notidian_collapsed_folders', JSON.stringify(state.collapsedFolders));
   localStorage.setItem('notidian_daily_folder_id', state.dailyFolderId || '');
+
+  if (window.Notidian && window.Notidian.mindMapInstance) {
+    window.Notidian.mindMapInstance.updateData();
+  }
+}
+
+export function saveCustomTagColorsToStorage() {
+  localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(state.customTagColors));
+  if (window.Notidian && window.Notidian.mindMapInstance) {
+    window.Notidian.mindMapInstance.updateData();
+  }
 }
 
 export function saveLogsToStorage() {
@@ -419,6 +488,15 @@ export function initStorage() {
       repairBlocks(note.blocks);
     }
   });
+
+  // Load Custom Tag Colors
+  try {
+    const savedColors = localStorage.getItem('notidian_custom_tag_colors');
+    state.customTagColors = savedColors ? JSON.parse(savedColors) : {};
+  } catch (e) {
+    console.error("Failed to parse custom tag colors:", e);
+    state.customTagColors = {};
+  }
 
   cleanDeadWikiLinksAndTags();
 

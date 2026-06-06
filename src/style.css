@@ -3788,3 +3788,212 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   font-size: 0.95em !important;
   display: inline-block;
 }
+
+/* 🔗 外部リンク編集ポップオーバー */
+.link-edit-popover {
+  background: rgba(13, 17, 28, 0.93) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+  border: 1px solid rgba(192, 132, 252, 0.28) !important;
+  box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.6), 0 0 20px rgba(192, 132, 252, 0.15) !important;
+  border-radius: 10px !important;
+  padding: 12px !important;
+  width: 290px;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  animation: dbPopoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.link-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.link-popover-label {
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
+  width: 60px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.link-popover-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.45) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 6px !important;
+  color: #ffffff !important;
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  outline: none !important;
+  transition: all 0.2s ease !important;
+}
+
+.link-popover-input:focus {
+  border-color: #c084fc !important;
+  box-shadow: 0 0 8px rgba(192, 132, 252, 0.25) !important;
+}
+
+.link-popover-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.link-popover-btn {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: var(--font-ui), sans-serif;
+}
+
+.link-popover-btn.btn-apply-link {
+  background: var(--accent-primary, #8b5cf6) !important;
+  color: #ffffff !important;
+  border: none !important;
+}
+
+.link-popover-btn.btn-apply-link:hover {
+  background: #a78bfa !important;
+  transform: translateY(-0.5px);
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+}
+
+.link-popover-btn.btn-open-link {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary, #f3f4f6) !important;
+}
+
+.link-popover-btn.btn-open-link:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  transform: translateY(-0.5px);
+}
+
+.link-popover-btn.btn-unlink-link {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border: 1px solid rgba(239, 68, 68, 0.18) !important;
+  color: #f87171 !important;
+}
+
+.link-popover-btn.btn-unlink-link:hover {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: rgba(239, 68, 68, 0.35) !important;
+  transform: translateY(-0.5px);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+}
+
+/* RIGHT SIDEBAR & MINDMAP LAYOUT */
+.sidebar-right {
+  background-color: var(--bg-sidebar);
+  border-left: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  backdrop-filter: var(--glass-blur);
+  z-index: 10;
+  overflow: hidden;
+}
+
+.sidebar-right-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Mindmap drag active styles */
+#mindmap-canvas:active {
+  cursor: grabbing !important;
+}
+
+/* Fullscreen Mindmap Mode */
+.mindmap-fullscreen-mode {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 1500 !important;
+  background: rgba(8, 10, 16, 0.97) !important;
+  backdrop-filter: blur(15px) !important;
+  -webkit-backdrop-filter: blur(15px) !important;
+  padding: 30px !important;
+  border-top: none !important;
+  flex: 0 0 100% !important;
+  box-shadow: 0 0 50px rgba(0, 0, 0, 0.9) !important;
+  animation: mindmapFullscreenFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  max-height: none !important; /* sidebar-section:last-of-type の 50vh 制限を上書き */
+}
+
+.mindmap-fullscreen-mode .mindmap-container {
+  height: calc(100% - 45px) !important;
+  flex: 1 !important;
+}
+
+.mindmap-fullscreen-mode canvas {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+@keyframes mindmapFullscreenFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Tag Color Picker style adjustment */
+.tag-color-input {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+  overflow: hidden;
+  outline: none;
+  transition: transform 0.15s ease;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+}
+
+.tag-color-input:hover {
+  transform: scale(1.25);
+}
+
+.tag-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.tag-color-input::-webkit-color-swatch {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+}
+
+.tag-color-input::-moz-color-swatch {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+}

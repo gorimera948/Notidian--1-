@@ -8,6 +8,7 @@ import {
   getActiveNote,
   cleanDeadWikiLinksAndTags,
   saveNotesToStorage,
+  saveCustomTagColorsToStorage,
   saveLogsToStorage,
   initStorage
 } from './state.js';
@@ -71,8 +72,13 @@ import {
   focusBlock,
   setupDragSelection,
   initSlashMenuSortable,
-  uncolumn
+  uncolumn,
+  showLinkEditPopover
 } from './editor.js';
+
+import { MindMap } from './mindmap.js';
+
+let mindMapInstance = null;
 
 // ==========================================
 // SHARED GLOBAL API HUB (Notidian)
@@ -121,6 +127,8 @@ window.Notidian = {
   setTimerVolume,
 
   // app
+  navigateToNote,
+  getNoteTagStyles,
   renderNoteList,
   deleteNote,
   updateBacklinks,
@@ -157,6 +165,10 @@ function navigateToNote(noteId, pushToHistory = true) {
   renderNoteList();
   renderEditor();
   updateHistoryButtons();
+
+  if (mindMapInstance) {
+    mindMapInstance.updateData();
+  }
 }
 
 function updateHistoryButtons() {
@@ -192,13 +204,15 @@ document.addEventListener('mousedown', (e) => {
 
   const extLinkEl = e.target.closest('.external-link');
   if (extLinkEl) {
-    const activeEditable = document.activeElement;
-    const isEditingThisBlock = activeEditable && 
-                               activeEditable.isContentEditable && 
-                               activeEditable.contains(extLinkEl);
+    const blockContentEl = extLinkEl.closest('.block-content');
+    const blockId = blockContentEl ? blockContentEl.getAttribute('data-id') : null;
+    const isEditingThisBlock = blockId && state.activeFocusedBlockId === blockId;
 
-    const shouldNavigate = !isEditingThisBlock || e.ctrlKey || e.metaKey;
-    if (shouldNavigate) {
+    if (isEditingThisBlock) {
+      e.preventDefault();
+      e.stopPropagation();
+      showLinkEditPopover(extLinkEl);
+    } else {
       e.preventDefault();
       e.stopPropagation();
       const href = extLinkEl.getAttribute('href');
@@ -1380,7 +1394,30 @@ function renderNormalTree(normalNotes) {
 // ==========================================
 const sidebarTagsContainer = document.getElementById('sidebar-tags-list');
 
+function hexToRgba(hex, alpha) {
+  let c = hex.substring(1);
+  if (c.length === 3) {
+    c = c[0] + c[0] + c[1] + c[1] + c[2] + c[2];
+  }
+  const r = parseInt(c.substring(0, 2), 16);
+  const g = parseInt(c.substring(2, 4), 16);
+  const b = parseInt(c.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function getNoteTagStyles(tag) {
+  const cleanTag = tag.trim();
+  
+  // カスタムカラーが存在する場合は動的にRGBAカラーを算出
+  if (state.customTagColors && state.customTagColors[cleanTag]) {
+    const hex = state.customTagColors[cleanTag];
+    return {
+      bg: hexToRgba(hex, 0.12),
+      fg: hex,
+      border: hexToRgba(hex, 0.25)
+    };
+  }
+
   const colors = [
     { bg: 'rgba(239, 68, 68, 0.12)', fg: '#fca5a5', border: 'rgba(239, 68, 68, 0.25)' },   // red
     { bg: 'rgba(59, 130, 246, 0.12)', fg: '#93c5fd', border: 'rgba(59, 130, 246, 0.25)' },  // blue
@@ -1391,8 +1428,9 @@ function getNoteTagStyles(tag) {
     { bg: 'rgba(148, 163, 184, 0.12)', fg: '#cbd5e1', border: 'rgba(148, 163, 184, 0.25)' }   // gray
   ];
   let hash = 0;
-  for (let i = 0; i < tag.length; i++) {
-    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  const tagLower = cleanTag.toLowerCase();
+  for (let i = 0; i < tagLower.length; i++) {
+    hash = tagLower.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
 }
@@ -1447,10 +1485,34 @@ export function renderSidebarTags() {
       <span class="tag-name" style="color: ${tagStyles.fg}; font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
         <i class="fa-solid fa-tag"></i> ${escapeHTML(tag)}
       </span>
-      <span class="tag-count" style="font-size: 10px; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 10px; color: var(--text-muted); font-weight: 600;">
-        ${count}
-      </span>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <input type="color" class="tag-color-input" value="${tagStyles.fg}" data-tag="${escapeHTML(tag)}" title="タグの色を変更">
+        <span class="tag-count" style="font-size: 10px; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 10px; color: var(--text-muted); font-weight: 600;">
+          ${count}
+        </span>
+      </div>
     `;
+
+    // カラーピッカーの処理
+    const colorInput = el.querySelector('.tag-color-input');
+    if (colorInput) {
+      // タグフィルタリング発発防止
+      colorInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+      colorInput.addEventListener('change', (e) => {
+        const newColor = e.target.value;
+        state.customTagColors[tag] = newColor;
+        saveCustomTagColorsToStorage();
+        
+        // 再描画
+        renderSidebarTags();
+        renderEditor();
+        if (mindMapInstance) {
+          mindMapInstance.updateData();
+        }
+      });
+    }
 
     el.addEventListener('mouseenter', () => {
       if (!isActive) {
@@ -2259,6 +2321,10 @@ function initApp() {
   initSlashMenuSortable();
   setupDragSelection();
 
+  // Initialize MindMap
+  mindMapInstance = new MindMap();
+  window.Notidian.mindMapInstance = mindMapInstance;
+
   // Re-bind standard events
   if (window.setupBlockBulkActionEvents) window.setupBlockBulkActionEvents();
   if (window.setupBlockCopyPasteShortcuts) window.setupBlockCopyPasteShortcuts();
@@ -2572,22 +2638,7 @@ function initApp() {
     }
   }, { passive: true });
 
-  // Prevent backspace browser backs
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Backspace') {
-      const active = document.activeElement;
-      const isEditable = active && (
-        active.tagName === 'INPUT' ||
-        active.tagName === 'TEXTAREA' ||
-        active.isContentEditable ||
-        active.getAttribute('contenteditable') === 'true' ||
-        active.closest('[contenteditable="true"]')
-      );
-      if (!isEditable) {
-        e.preventDefault();
-      }
-    }
-  });
+
 
   // Global keydown listeners for Undo / Redo
   window.addEventListener('keydown', (e) => {

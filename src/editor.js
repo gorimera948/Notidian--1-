@@ -1,7 +1,7 @@
-import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo } from './state.js';
+import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, historyState } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
-import { createDatabaseDOM } from './database.js';
+import { createDatabaseDOM, removeBlocksRecursively } from './database.js';
 
 function renderNoteList() {
   if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
@@ -856,7 +856,13 @@ function createEditableContent(block) {
   contentDiv.addEventListener('blur', () => {
     // すでにDOMから取り除かれている古い要素なら、非同期の暴発によるデータ破壊を防ぐため無視する
     if (!document.body.contains(contentDiv)) return;
+    if (historyState.isApplying) return;
     if (state.isPasting) return;
+
+    // リンク編集ポップオーバーが開いている間は、この自動 blur 処理を一時スキップする
+    if (document.getElementById('notidian-link-edit-popover')) {
+      return;
+    }
 
     // Save content to state (using HTML-to-WikiText serializer)
     const textVal = serializeHtmlToWikiText(contentDiv);
@@ -2174,6 +2180,7 @@ export function setupBlockCopyPasteShortcuts() {
   window.addEventListener('keydown', (e) => {
     const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
     const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+    const isDelete = e.key === 'Backspace' || e.key === 'Delete';
 
     if (state.selectedBlockIds && state.selectedBlockIds.length > 0) {
       const activeNote = getActiveNote();
@@ -2233,6 +2240,26 @@ export function setupBlockCopyPasteShortcuts() {
         clearBlockSelection();
         renderEditor();
         showToast(`${pastedBlocks.length}件のブロックを貼り付けました`);
+      }
+
+      if (isDelete) {
+        const active = document.activeElement;
+        const isEditable = active && (
+          active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.isContentEditable ||
+          active.getAttribute('contenteditable') === 'true' ||
+          active.closest('[contenteditable="true"]')
+        );
+        if (!isEditable) {
+          e.preventDefault();
+          pushHistory();
+          activeNote.blocks = removeBlocksRecursively(activeNote.blocks, state.selectedBlockIds);
+          saveNotesToStorage();
+          clearBlockSelection();
+          renderEditor();
+          showToast('選択したブロックを削除しました');
+        }
       }
     }
   });
@@ -3147,15 +3174,24 @@ export function setupMultipleBlockSelectionShortcuts() {
 
     if (key === 'Backspace' || key === 'Delete') {
       e.preventDefault();
-      const res = deleteMultipleBlockSelection(selInfo);
-      if (res) {
-        setTimeout(() => {
-          const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
-          if (el) {
-            focusBlock(el);
-            setCaretByWikiOffset(el, res.mergeOffset);
-          }
-        }, 50);
+      try {
+        const res = deleteMultipleBlockSelection(selInfo);
+        if (res) {
+          setTimeout(() => {
+            const el = document.querySelector(`.block-content[data-id="${res.targetBlockId}"]`);
+            if (el) {
+              focusBlock(el);
+              setCaretByWikiOffset(el, res.mergeOffset);
+            }
+          }, 50);
+        }
+      } catch (err) {
+        console.error("Failed to delete multiple block selection, running fallback:", err);
+        try {
+          selInfo.range.deleteContents();
+        } catch (e2) {
+          console.error("Fallback deleteContents failed:", e2);
+        }
       }
       return;
     }
@@ -3323,114 +3359,150 @@ if (typeof window !== 'undefined') {
 
 window.setupBlockCopyPasteShortcuts = setupBlockCopyPasteShortcuts;
 
-// 外部リンク（external-link）のインライン編集ハンドラ
-if (typeof window !== 'undefined') {
-  let isUpdatingDOM = false;
+// 外部リンクの編集用ポップオーバー
+export function showLinkEditPopover(extLinkEl) {
+  const existing = document.getElementById('notidian-link-edit-popover');
+  if (existing) existing.remove();
 
-  document.addEventListener('selectionchange', () => {
-    if (isUpdatingDOM) return;
+  const rect = extLinkEl.getBoundingClientRect();
+  const label = extLinkEl.textContent || '';
+  const url = extLinkEl.getAttribute('href') || '';
+  
+  const popover = document.createElement('div');
+  popover.id = 'notidian-link-edit-popover';
+  popover.className = 'link-edit-popover';
+  popover.style.position = 'fixed';
+  popover.style.left = `${Math.max(10, Math.min(window.innerWidth - 310, rect.left))}px`;
+  popover.style.top = `${rect.bottom + window.scrollY + 6}px`;
 
-    const activeEl = document.activeElement;
-    if (!activeEl || !activeEl.classList.contains('block-content')) return;
+  popover.innerHTML = `
+    <div class="link-popover-row">
+      <span class="link-popover-label">テキスト</span>
+      <input type="text" class="link-popover-input link-label-input" value="${escapeHTML(label)}" placeholder="表示名">
+    </div>
+    <div class="link-popover-row">
+      <span class="link-popover-label">リンク先</span>
+      <input type="text" class="link-popover-input link-url-input" value="${escapeHTML(url)}" placeholder="https://...">
+    </div>
+    <div class="link-popover-actions">
+      <button class="link-popover-btn btn-apply-link">適用</button>
+      <button class="link-popover-btn btn-open-link" title="新しいタブで開く"><i class="fa-solid fa-up-right-from-square"></i> 開く</button>
+    </div>
+  `;
 
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
+  popover.addEventListener('mousedown', (e) => e.stopPropagation());
+  popover.addEventListener('click', (e) => e.stopPropagation());
 
-    const range = selection.getRangeAt(0);
-    const container = range.startContainer;
+  const labelInput = popover.querySelector('.link-label-input');
+  const urlInput = popover.querySelector('.link-url-input');
+  const applyBtn = popover.querySelector('.btn-apply-link');
+  const openBtn = popover.querySelector('.btn-open-link');
 
-    // 1. カーソルが .external-link に触れている場合の展開処理
-    let currentLink = null;
-    if (container.nodeType === Node.TEXT_NODE) {
-      currentLink = container.parentNode.closest('.external-link');
-    } else if (container.nodeType === Node.ELEMENT_NODE) {
-      currentLink = container.closest('.external-link');
+  const updateAndSave = (newLabel, newUrl) => {
+    const contentDiv = extLinkEl.closest('.block-content');
+    if (!contentDiv) return;
+
+    const blockId = contentDiv.getAttribute('data-id');
+    const note = getActiveNote();
+    if (!note) return;
+
+    const found = findBlockAndParent(note.blocks, blockId);
+    if (!found) return;
+
+    // 1. DOM要素の直接更新
+    extLinkEl.textContent = newLabel;
+    extLinkEl.setAttribute('href', newUrl);
+    extLinkEl.setAttribute('title', newUrl);
+
+    // 2. メモリ上へ保存
+    pushHistory();
+    const textVal = serializeHtmlToWikiText(contentDiv);
+    const oldContent = found.block.content;
+    found.block.content = textVal;
+    
+    // 3. ポップオーバーを先に消去してblur抑制を解除
+    popover.remove();
+    document.removeEventListener('mousedown', closePopoverOnOutsideClick);
+
+    // 4. フォーカスを解除し、手動で正式な blur を実行して再描画
+    state.activeFocusedBlockId = null;
+    contentDiv.removeAttribute('contenteditable');
+    contentDiv.innerHTML = parseWikiLinks(escapeHTML(found.block.content));
+
+    if (oldContent !== textVal) {
+      saveNotesToStorage();
+      updateBacklinks();
+    }
+  };
+
+  const handleApply = () => {
+    const newLabel = labelInput.value.trim() || 'リンク';
+    let newUrl = urlInput.value.trim();
+    if (!newUrl) return;
+
+    if (!/^https?:\/\//i.test(newUrl)) {
+      newUrl = 'https://' + newUrl;
     }
 
-    if (currentLink && !isUpdatingDOM) {
-      isUpdatingDOM = true;
-      const label = currentLink.textContent || '';
-      const url = currentLink.getAttribute('href') || '';
-      
-      let offset = range.startOffset;
-      if (range.startContainer.nodeType !== Node.TEXT_NODE) {
-        offset = 0;
-      }
+    updateAndSave(newLabel, newUrl);
+  };
 
-      const editSpan = document.createElement('span');
-      editSpan.className = 'external-link-edit';
-      editSpan.setAttribute('data-href', url);
-      editSpan.textContent = `[${label}](${url})`;
-
-      const parent = currentLink.parentNode;
-      parent.replaceChild(editSpan, currentLink);
-
-      // カーソルを [分 (+1) 再配置
-      const newRange = document.createRange();
-      newRange.setStart(editSpan.firstChild, Math.min(offset + 1, editSpan.textContent.length));
-      newRange.collapse(true);
-      selection.removeAllRanges();
-      selection.addRange(newRange);
-      
-      // ブロック状態の同期
-      const note = getActiveNote();
-      if (note && typeof findBlockAndParent === 'function') {
-        const found = findBlockAndParent(note.blocks, state.activeFocusedBlockId);
-        if (found) {
-          found.block.content = serializeHtmlToWikiText(activeEl);
-        }
-      }
-
-      isUpdatingDOM = false;
-      return;
-    }
-
-    // 2. カーソルが .external-link-edit の外側に出た場合の復元処理
-    const editingLinks = activeEl.querySelectorAll('.external-link-edit');
-    editingLinks.forEach(editSpan => {
-      // カーソルがこのスパンの中に含まれているかチェック
-      const isCursorInside = range.intersectsNode(editSpan) || 
-                             (container.nodeType === Node.TEXT_NODE && container.parentNode === editSpan) ||
-                             (container === editSpan);
-
-      if (!isCursorInside && !isUpdatingDOM) {
-        isUpdatingDOM = true;
-        const text = editSpan.textContent;
-        // 正規表現で [label](url) を解析
-        const match = text.match(/^\[(.*?)\]\((https?:\/\/[^\s\)]+)\)$/);
-        if (match) {
-          const newLabel = match[1];
-          const newUrl = match[2];
-
-          const a = document.createElement('a');
-          a.className = 'external-link';
-          a.href = newUrl;
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-          a.title = newUrl;
-          a.textContent = newLabel;
-
-          editSpan.parentNode.replaceChild(a, editSpan);
-        } else {
-          // 形式が壊れた場合はプレーンテキストに戻す
-          const textNode = document.createTextNode(text);
-          editSpan.parentNode.replaceChild(textNode, editSpan);
-        }
-
-        // 同期
-        const note = getActiveNote();
-        if (note && typeof findBlockAndParent === 'function') {
-          const found = findBlockAndParent(note.blocks, state.activeFocusedBlockId);
-          if (found) {
-            found.block.content = serializeHtmlToWikiText(activeEl);
-            saveNotesToStorage();
-          }
-        }
-
-        isUpdatingDOM = false;
+  applyBtn.addEventListener('click', handleApply);
+  [labelInput, urlInput].forEach(input => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleApply();
       }
     });
   });
+
+  openBtn.addEventListener('click', () => {
+    const newUrl = urlInput.value.trim();
+    if (newUrl) {
+      let finalUrl = newUrl;
+      if (!/^https?:\/\//i.test(finalUrl)) {
+        finalUrl = 'https://' + finalUrl;
+      }
+      window.open(finalUrl, '_blank', 'noopener,noreferrer');
+    }
+  });
+
+  const closePopoverOnOutsideClick = (e) => {
+    if (!popover.contains(e.target) && e.target !== extLinkEl) {
+      popover.remove();
+      document.removeEventListener('mousedown', closePopoverOnOutsideClick);
+
+      // キャンセル時もエディタを正式に blur 状態に更新・再描画する
+      const contentDiv = extLinkEl.closest('.block-content');
+      if (contentDiv) {
+        const blockId = contentDiv.getAttribute('data-id');
+        const note = getActiveNote();
+        if (note) {
+          const found = findBlockAndParent(note.blocks, blockId);
+          if (found) {
+            state.activeFocusedBlockId = null;
+            contentDiv.removeAttribute('contenteditable');
+            const textVal = serializeHtmlToWikiText(contentDiv);
+            const oldContent = found.block.content;
+            found.block.content = textVal;
+            contentDiv.innerHTML = parseWikiLinks(escapeHTML(found.block.content));
+            if (oldContent !== textVal) {
+              saveNotesToStorage();
+              updateBacklinks();
+            }
+          }
+        }
+      }
+    }
+  };
+
+  document.body.appendChild(popover);
+  setTimeout(() => {
+    document.addEventListener('mousedown', closePopoverOnOutsideClick);
+    labelInput.focus();
+    labelInput.select();
+  }, 10);
 }
 
 
