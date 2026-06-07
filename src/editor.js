@@ -1,7 +1,7 @@
 import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, historyState } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
-import { createDatabaseDOM, removeBlocksRecursively } from './database.js';
+import { createDatabaseDOM, removeBlocksRecursively, updateBulkActionBar, updateBlockBulkActionBar } from './database.js';
 
 function renderNoteList() {
   if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
@@ -196,6 +196,22 @@ export function renderEditor() {
         toolbarLeft.appendChild(overwriteBtn);
       }
     }
+  }
+
+  // 同期処理: 画面再描画後も一括操作バーの表示状態を最新にする
+  updateBlockBulkActionBar();
+
+  if (window.tableSelection && window.tableSelection.blockId) {
+    const found = findBlockAndParent(note.blocks, window.tableSelection.blockId);
+    if (found && found.block) {
+      const rows = found.block.properties?.rows || [];
+      updateBulkActionBar(found.block, rows);
+    } else {
+      if (typeof window.clearTableSelection === 'function') window.clearTableSelection();
+    }
+  } else {
+    const bar = document.getElementById('db-bulk-action-bar');
+    if (bar) bar.style.display = 'none';
   }
 }
 

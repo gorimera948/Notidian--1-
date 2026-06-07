@@ -1044,6 +1044,13 @@ export function createDatabaseDOM(block) {
       const calendarEl = renderCalendarViewDOM(block, visibleRows);
       calendarWrapper.appendChild(calendarEl);
       container.appendChild(calendarWrapper);
+    } else if (activeView.layout === 'gallery') {
+      const galleryWrapper = document.createElement('div');
+      galleryWrapper.className = 'db-gallery-container';
+
+      const galleryEl = renderGalleryViewDOM(block, visibleRows);
+      galleryWrapper.appendChild(galleryEl);
+      container.appendChild(galleryWrapper);
     } else if (activeView.layout && activeView.layout.startsWith('chart')) {
       const chartWrapper = document.createElement('div');
       chartWrapper.style.padding = '16px';
@@ -1140,6 +1147,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     });
 
     updateBulkActionBar(block, rowDataList);
+    renderEditor();
   });
   controlTh.appendChild(allCheck);
 
@@ -1165,6 +1173,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     if (col.type === 'status') iconClass = 'fa-solid fa-circle-check';
     if (col.type === 'date') iconClass = 'fa-regular fa-calendar';
     if (col.type === 'checkbox') iconClass = 'fa-regular fa-square-check';
+    if (col.type === 'url') iconClass = 'fa-solid fa-link';
 
     container.innerHTML = `
       <i class="${iconClass} db-header-icon"></i>
@@ -1283,6 +1292,12 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
         }
         return;
       }
+      e.stopPropagation();
+      const checkbox = tr.querySelector('.db-row-select-check');
+      if (checkbox) {
+        checkbox.checked = !checkbox.checked;
+        handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, checkbox);
+      }
     });
     // 削除・一括選択コントロールtd（極小コンパクト化）
     const controlTd = document.createElement('td');
@@ -1359,18 +1374,48 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
         td.appendChild(badge);
       } else if (col.type === 'select') {
-        const badge = document.createElement('span');
-        badge.className = `db-select-badge db-tag-${getTagColor(col, val)}`;
-        badge.textContent = val || '選択なし';
-        badge.style.cursor = 'pointer';
+        const wrapper = document.createElement('div');
+        wrapper.className = 'db-modal-select-wrapper';
+        wrapper.style.cursor = 'pointer';
+        wrapper.style.minHeight = '20px';
 
-        badge.addEventListener('click', (e) => {
+        const tags = String(val || '').split(',').map(t => t.trim()).filter(Boolean);
+        if (tags.length === 0) {
+          const badge = document.createElement('span');
+          badge.className = 'db-select-badge db-tag-gray';
+          badge.style.opacity = '0.5';
+          badge.style.fontStyle = 'italic';
+          badge.textContent = '選択なし';
+          wrapper.appendChild(badge);
+        } else {
+          tags.forEach(tagVal => {
+            const badge = document.createElement('span');
+            badge.className = `db-select-badge db-tag-${getTagColor(col, tagVal)}`;
+            badge.textContent = tagVal;
+            
+            const removeBtn = document.createElement('span');
+            removeBtn.className = 'btn-remove-tag';
+            removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            removeBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              pushHistory();
+              const newTags = tags.filter(t => t !== tagVal);
+              row[col.id] = newTags.join(', ');
+              saveNotesToStorage();
+              renderEditor();
+            });
+            badge.appendChild(removeBtn);
+            wrapper.appendChild(badge);
+          });
+        }
+
+        wrapper.addEventListener('click', (e) => {
           if (e.shiftKey) return;
           e.stopPropagation();
           showSelectTagPopover(e, block, actualIndex, col.id, col.options || []);
         });
 
-        td.appendChild(badge);
+        td.appendChild(wrapper);
       } else if (col.type === 'date') {
         const dateSpan = document.createElement('span');
         dateSpan.className = 'db-date-span';
@@ -1402,6 +1447,39 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
         });
         td.style.textAlign = 'center';
         td.appendChild(check);
+      } else if (col.type === 'url') {
+        const cellDiv = document.createElement('div');
+        cellDiv.className = 'db-cell-edit';
+        cellDiv.contentEditable = 'true';
+        cellDiv.textContent = val;
+
+        cellDiv.addEventListener('focus', () => {
+          state.lastActiveEditTarget = cellDiv;
+        });
+
+        cellDiv.addEventListener('blur', () => {
+          if (!document.body.contains(cellDiv)) return;
+          if (historyState.isApplying) return;
+
+          const newVal = cellDiv.textContent.trim();
+          row[col.id] = newVal;
+          saveNotesToStorage();
+        });
+
+        td.appendChild(cellDiv);
+
+        if (val && (String(val).startsWith('http://') || String(val).startsWith('https://'))) {
+          const linkBtn = document.createElement('a');
+          linkBtn.href = val;
+          linkBtn.target = '_blank';
+          linkBtn.className = 'db-cell-link-btn';
+          linkBtn.title = '新しいタブでURLを開く';
+          linkBtn.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square"></i>';
+          linkBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+          });
+          td.appendChild(linkBtn);
+        }
       } else {
         const cellDiv = document.createElement('div');
         cellDiv.className = 'db-cell-edit';
@@ -1752,6 +1830,7 @@ function showAddColumnPopover(e, block) {
     <div class="db-popover-item" data-type="status"><i class="fa-solid fa-circle-check" style="width:14px;"></i>ステータス</div>
     <div class="db-popover-item" data-type="date"><i class="fa-regular fa-calendar" style="width:14px;"></i>日付</div>
     <div class="db-popover-item" data-type="checkbox"><i class="fa-regular fa-square-check" style="width:14px;"></i>チェックボックス</div>
+    <div class="db-popover-item" data-type="url"><i class="fa-solid fa-link" style="width:14px;"></i>URL</div>
     <div class="db-popover-divider"></div>
     <div class="db-popover-item" id="btn-create-col" style="justify-content:center; background:var(--accent-primary); color:white; font-weight:600; margin-top:4px;">作成</div>
   `;
@@ -1770,10 +1849,11 @@ function showAddColumnPopover(e, block) {
     'select': 'セレクトタグ',
     'status': 'ステータス',
     'date': '日付',
-    'checkbox': 'チェックボックス'
+    'checkbox': 'チェックボックス',
+    'url': 'URL'
   };
 
-  const defaultNameList = ['プロパティ', 'テキスト', '数値', 'セレクトタグ', 'セレクト', 'ステータス', '日付', 'チェックボックス', ''];
+  const defaultNameList = ['プロパティ', 'テキスト', '数値', 'セレクトタグ', 'セレクト', 'ステータス', '日付', 'チェックボックス', 'URL', ''];
 
   const items = popover.querySelectorAll('.db-popover-item[data-type]');
   items.forEach(item => {
@@ -1851,6 +1931,7 @@ function showAddViewPopover(e, block) {
     <div style="padding:6px; display:flex; flex-direction:column; gap:4px;">
       <div class="db-popover-item" data-layout="table" data-name="テーブル"><i class="fa-solid fa-table" style="width:14px; color:#60a5fa; margin-right:6px;"></i>📋 テーブル（表）</div>
       <div class="db-popover-item" data-layout="calendar" data-name="カレンダー"><i class="fa-regular fa-calendar" style="width:14px; color:#34d399; margin-right:6px;"></i>📅 カレンダー</div>
+      <div class="db-popover-item" data-layout="gallery" data-name="ギャラリー"><i class="fa-regular fa-image" style="width:14px; color:#8b5cf6; margin-right:6px;"></i>🏞️ ギャラリー</div>
       <div class="db-popover-item" data-layout="chart-bar" data-name="棒グラフ"><i class="fa-solid fa-chart-bar" style="width:14px; color:#f472b6; margin-right:6px;"></i>📊 棒グラフ</div>
       <div class="db-popover-item" data-layout="chart-line" data-name="折れ線グラフ"><i class="fa-solid fa-chart-line" style="width:14px; color:#a78bfa; margin-right:6px;"></i>📈 折れ線グラフ</div>
       <div class="db-popover-item" data-layout="chart-donut" data-name="ドーナツグラフ"><i class="fa-solid fa-chart-pie" style="width:14px; color:#fbbf24; margin-right:6px;"></i>🍩 ドーナツグラフ</div>
@@ -1913,12 +1994,12 @@ function showViewConfigPopover(e, block, view) {
       <select id="view-layout-select" class="db-filter-val-select" style="width:100%;">
         <option value="table" ${view.layout === 'table' ? 'selected' : ''}>📋 テーブル（表）</option>
         <option value="calendar" ${view.layout === 'calendar' ? 'selected' : ''}>📅 カレンダー</option>
+        <option value="gallery" ${view.layout === 'gallery' ? 'selected' : ''}>🏞️ ギャラリー</option>
         <option value="chart-bar" ${view.layout === 'chart-bar' ? 'selected' : ''}>📊 棒グラフ</option>
         <option value="chart-line" ${view.layout === 'chart-line' ? 'selected' : ''}>📈 線グラフ</option>
         <option value="chart-donut" ${view.layout === 'chart-donut' ? 'selected' : ''}>🍩 ドーナツグラフ</option>
       </select>
     </div>
-
     <div class="db-popover-divider" style="margin:6px 0 4px 0;"></div>
     <button id="btn-save-view-config" class="db-filter-apply-btn" style="margin-top:4px; padding:4px 0;">完了</button>
   `;
@@ -2306,6 +2387,7 @@ function showColumnConfigPopover(e, block, col) {
     <div class="db-popover-item ${col.type === 'status' ? 'active' : ''}" data-type="status"><i class="fa-solid fa-circle-check" style="width:14px;"></i>ステータス</div>
     <div class="db-popover-item ${col.type === 'date' ? 'active' : ''}" data-type="date"><i class="fa-regular fa-calendar" style="width:14px;"></i>日付</div>
     <div class="db-popover-item ${col.type === 'checkbox' ? 'active' : ''}" data-type="checkbox"><i class="fa-regular fa-square-check" style="width:14px;"></i>チェックボックス</div>
+    <div class="db-popover-item ${col.type === 'url' ? 'active' : ''}" data-type="url"><i class="fa-solid fa-link" style="width:14px;"></i>URL</div>
     <div class="db-popover-divider"></div>
     <div class="db-popover-item" style="color:var(--text-primary);" id="btn-dup-col"><i class="fa-solid fa-copy" style="width:14px; color:var(--accent-primary);"></i>列を複製</div>
     <div class="db-popover-divider"></div>
@@ -2370,10 +2452,11 @@ function showColumnConfigPopover(e, block, col) {
           'select': 'セレクトタグ',
           'status': 'ステータス',
           'date': '日付',
-          'checkbox': 'チェックボックス'
+          'checkbox': 'チェックボックス',
+          'url': 'URL'
         };
 
-        const defaultNameList = ['プロパティ', 'テキスト', '数値', 'セレクトタグ', 'セレクト', 'ステータス', '日付', 'チェックボックス', ''];
+        const defaultNameList = ['プロパティ', 'テキスト', '数値', 'セレクトタグ', 'セレクト', 'ステータス', '日付', 'チェックボックス', 'URL', ''];
 
         // 現在の名前がデフォルト名であれば新しいタイプ名に自動設定（すでに独自名なら無視）
         const currentName = col.name ? col.name.trim() : '';
@@ -2883,33 +2966,59 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
   optionsList.style = 'max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;';
   popover.appendChild(optionsList);
 
-  // 選択なし（クリア）オプション
+  // 選択なし（すべてクリア）オプション
   const noneItem = document.createElement('div');
   noneItem.className = `db-popover-item ${!currentVal ? 'active' : ''}`;
-  noneItem.innerHTML = `<span class="db-select-badge db-tag-gray" style="opacity:0.6; font-style:italic;">選択なし (クリア)</span>`;
+  noneItem.innerHTML = `<span class="db-select-badge db-tag-gray" style="opacity:0.6; font-style:italic;">すべてクリア</span>`;
   noneItem.addEventListener('click', (evt) => {
     evt.stopPropagation();
+    pushHistory();
     block.properties.rows[rowIndex][colId] = '';
-    popover.remove();
     saveNotesToStorage();
     renderEditor();
+    
+    const overlay = document.querySelector('.db-modal-overlay');
+    if (overlay) {
+      showDbRowEditModal(block, block.properties.rows[rowIndex], rowIndex);
+    }
+    
+    showSelectTagPopover(e, block, rowIndex, colId, col.options);
   });
   optionsList.appendChild(noneItem);
 
   // 既存タグの生成
   const items = [];
+  const tags = String(currentVal || '').split(',').map(t => t.trim()).filter(Boolean);
+  
   tagOptions.forEach(opt => {
     const item = document.createElement('div');
-    const isAct = currentVal === opt.id || currentVal === opt.name;
+    const isAct = tags.includes(opt.name);
     item.className = `db-popover-item ${isAct ? 'active' : ''}`;
-    item.innerHTML = `<span class="db-select-badge db-tag-${opt.color || 'gray'}">${escapeHTML(opt.name)}</span>`;
+    
+    const checkIcon = isAct ? '<i class="fa-solid fa-check" style="margin-right: 6px; font-size: 10px; color: var(--accent-primary);"></i>' : '';
+    item.innerHTML = `${checkIcon}<span class="db-select-badge db-tag-${opt.color || 'gray'}">${escapeHTML(opt.name)}</span>`;
 
     item.addEventListener('click', (evt) => {
       evt.stopPropagation();
-      block.properties.rows[rowIndex][colId] = opt.name;
-      popover.remove();
+      pushHistory();
+      
+      let newTags;
+      if (isAct) {
+        newTags = tags.filter(t => t !== opt.name);
+      } else {
+        newTags = [...tags, opt.name];
+      }
+      
+      block.properties.rows[rowIndex][colId] = newTags.join(', ');
       saveNotesToStorage();
       renderEditor();
+      
+      const overlay = document.querySelector('.db-modal-overlay');
+      if (overlay) {
+        showDbRowEditModal(block, block.properties.rows[rowIndex], rowIndex);
+      }
+      
+      showSelectTagPopover(e, block, rowIndex, colId, col.options);
     });
     optionsList.appendChild(item);
     items.push({ el: item, name: opt.name.toLowerCase(), opt });
@@ -2961,16 +3070,29 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       const val = searchInput.value.trim();
       if (!val) return;
 
+      pushHistory();
       let found = tagOptions.find(o => o.name.toLowerCase() === val.toLowerCase() || o.id.toLowerCase() === val.toLowerCase());
       if (!found) {
         found = { id: val, name: val, color: getTagHashColor(val) };
         tagOptions.push(found);
         col.options = tagOptions;
       }
-      block.properties.rows[rowIndex][colId] = found.name;
-      popover.remove();
+      
+      const currentTags = String(block.properties.rows[rowIndex][colId] || '').split(',').map(t => t.trim()).filter(Boolean);
+      if (!currentTags.includes(found.name)) {
+        currentTags.push(found.name);
+      }
+      block.properties.rows[rowIndex][colId] = currentTags.join(', ');
+      
       saveNotesToStorage();
       renderEditor();
+      
+      const overlay = document.querySelector('.db-modal-overlay');
+      if (overlay) {
+        showDbRowEditModal(block, block.properties.rows[rowIndex], rowIndex);
+      }
+      
+      showSelectTagPopover(e, block, rowIndex, colId, col.options);
     }
   });
 
@@ -2979,13 +3101,26 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
     evt.stopPropagation();
     const val = searchInput.value.trim();
     if (val) {
+      pushHistory();
       const found = { id: val, name: val, color: getTagHashColor(val) };
       tagOptions.push(found);
       col.options = tagOptions;
-      block.properties.rows[rowIndex][colId] = found.name;
-      popover.remove();
+      
+      const currentTags = String(block.properties.rows[rowIndex][colId] || '').split(',').map(t => t.trim()).filter(Boolean);
+      if (!currentTags.includes(found.name)) {
+        currentTags.push(found.name);
+      }
+      block.properties.rows[rowIndex][colId] = currentTags.join(', ');
+      
       saveNotesToStorage();
       renderEditor();
+      
+      const overlay = document.querySelector('.db-modal-overlay');
+      if (overlay) {
+        showDbRowEditModal(block, block.properties.rows[rowIndex], rowIndex);
+      }
+      
+      showSelectTagPopover(e, block, rowIndex, colId, col.options);
     }
   });
 
@@ -3030,6 +3165,12 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
         opt.color = selectedColor;
         saveNotesToStorage();
         renderEditor();
+        
+        const overlay = document.querySelector('.db-modal-overlay');
+        if (overlay) {
+          showDbRowEditModal(block, block.properties.rows[rowIndex], rowIndex);
+        }
+        
         showSelectTagPopover(e, block, rowIndex, colId, tagOptions); // リロード
       });
     });
@@ -3048,10 +3189,18 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
         opt.id = val; // IDも同期
         // 行側の参照値も更新
         block.properties.rows.forEach(r => {
-          if (r[colId] === oldName) r[colId] = val;
+          const rowVal = r[colId] || '';
+          const currentTags = String(rowVal).split(',').map(t => t.trim()).filter(Boolean);
+          const newTags = currentTags.map(t => t === oldName ? val : t);
+          r[colId] = newTags.join(', ');
         });
         saveNotesToStorage();
         renderEditor();
+        
+        const overlay = document.querySelector('.db-modal-overlay');
+        if (overlay) {
+          showDbRowEditModal(block, block.properties.rows[rowIndex], rowIndex);
+        }
       }
     });
     nameInput.addEventListener('keydown', (evt) => {
@@ -3072,13 +3221,23 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       evt.stopPropagation();
       showDeleteConfirmPopover(evt, `タグ「${opt.name}」を削除しますか？`, () => {
         col.options = tagOptions.filter(o => o.id !== opt.id);
+        
+        // 行側の参照値も更新
         block.properties.rows.forEach(r => {
-          if (r[colId] === opt.name || r[colId] === opt.id) {
-            r[colId] = '';
-          }
+          const rowVal = r[colId] || '';
+          const currentTags = String(rowVal).split(',').map(t => t.trim()).filter(Boolean);
+          const newTags = currentTags.filter(t => t !== opt.name && t !== opt.id);
+          r[colId] = newTags.join(', ');
         });
+        
         saveNotesToStorage();
         renderEditor();
+        
+        const overlay = document.querySelector('.db-modal-overlay');
+        if (overlay) {
+          showDbRowEditModal(block, block.properties.rows[rowIndex], rowIndex);
+        }
+        
         showSelectTagPopover(e, block, rowIndex, colId, col.options); // リロード
       });
     });
@@ -3097,19 +3256,29 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       animation: 150,
       handle: '.db-status-drag-handle',
       onEnd: () => {
-        const newOptions = [];
-        const rows = configContainer.querySelectorAll('.db-status-config-row');
+        const rows = Array.from(configContainer.querySelectorAll('.db-status-config-row'));
+        const newOpts = [];
         rows.forEach(r => {
-          const optId = r.getAttribute('data-id');
-          const foundOpt = tagOptions.find(o => o.id === optId);
-          if (foundOpt) newOptions.push(foundOpt);
+          const id = r.getAttribute('data-id');
+          const found = tagOptions.find(o => o.id === id);
+          if (found) newOpts.push(found);
         });
-        col.options = newOptions;
+        col.options = newOpts;
         saveNotesToStorage();
+        renderEditor();
       }
     });
-    input.focus();
-  }, 50);
+  }, 100);
+
+  const closePopover = (evt) => {
+    if (!popover.contains(evt.target) && !evt.target.closest('.btn-add-tag-modal') && !evt.target.closest('.btn-remove-tag') && !evt.target.closest('.db-modal-select-wrapper') && !evt.target.closest('.db-floating-popover')) {
+      popover.remove();
+      document.removeEventListener('click', closePopover);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', closePopover);
+  }, 0);
 }
 
 function showCalcOptionsPopover(e, block, col, calcTd, rowDataList = null) {
@@ -4106,6 +4275,7 @@ function handleSelectAllChange(block, rowDataList, isChecked) {
   }
 
   updateBulkActionBar(block, rowDataList);
+  renderEditor();
 }
 
 function clearTableSelection() {
@@ -4192,7 +4362,7 @@ function handleBlockClick(e, blockId) {
   updateBlockBulkActionBar();
 }
 
-function updateBlockBulkActionBar() {
+export function updateBlockBulkActionBar() {
   const bar = document.getElementById('block-bulk-action-bar');
   const countSpan = document.getElementById('block-bulk-select-count');
   if (!bar || !countSpan) return;
@@ -4327,7 +4497,7 @@ function applyBulkPropertyChange(block, colId, value) {
   renderEditor();
 }
 
-function updateBulkActionBar(block, rowDataList = null) {
+export function updateBulkActionBar(block, rowDataList = null) {
   const bar = document.getElementById('db-bulk-action-bar');
   const countSpan = document.getElementById('bulk-select-count');
   const container = document.getElementById('bulk-actions-container');
@@ -7074,7 +7244,7 @@ function renderChartViewDOM(block, rowDataList) {
     const outerRadius = 80;
     const innerRadius = 55;
 
-    // ドーナツグラフ의 凡例の数に合わせてSVGの高さを自動拡張
+    // ドーナツグラフの凡例の数に合わせてSVGの高さを自動拡張
     const svgHeight = Math.max(320, 80 + donutData.length * 40 + 20);
     svg.setAttribute('height', svgHeight.toString());
 
@@ -7270,41 +7440,464 @@ function renderChartViewDOM(block, rowDataList) {
 
 window.setupBlockBulkActionEvents = setupBlockBulkActionEvents;
 
-function findDOMPositionByWikiOffset(container, wikiOffset) {
-  let currentWikiLength = 0;
+function showGalleryOptionsPopover(e, block, view) {
+  const existing = document.querySelectorAll('.db-floating-popover');
+  existing.forEach(p => p.remove());
 
-  function traverse(node) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const len = node.length;
-      if (currentWikiLength + len >= wikiOffset) {
-        return { node: node, offset: wikiOffset - currentWikiLength };
+  const popover = document.createElement('div');
+  popover.className = 'db-floating-popover db-gallery-options-popover';
+  popover.style.left = `${e.clientX}px`;
+  popover.style.top = `${e.clientY + 12}px`;
+  popover.style.width = '200px';
+
+  view.galleryShownColIds = view.galleryShownColIds || [];
+  const columns = block.properties.columns || [];
+  const addableCols = columns.filter(c => c.id !== 'col-title');
+
+  popover.innerHTML = `
+    <div style="font-size:10px; color:var(--text-muted); font-weight:700; padding:4px 6px; border-bottom:1px solid var(--border-light);">ギャラリー表示オプション</div>
+    <div style="padding:8px; display:flex; flex-direction:column; gap:8px; max-height: 280px; overflow-y: auto;">
+      <div style="font-size:9px; color:var(--text-muted); font-weight:700; margin-bottom:2px;">プロパティを表示</div>
+      <div id="gallery-properties-list" style="display:flex; flex-direction:column; gap:6px;">
+        ${addableCols.map(c => {
+          const isDefaultShown = c.type === 'select' || c.type === 'url';
+          const isChecked = view.galleryShownColIds.length === 0 ? isDefaultShown : view.galleryShownColIds.includes(c.id);
+          
+          let typeIcon = 'fa-regular fa-file-lines';
+          if (c.type === 'number') typeIcon = 'fa-solid fa-hashtag';
+          if (c.type === 'select') typeIcon = 'fa-solid fa-list-ul';
+          if (c.type === 'status') typeIcon = 'fa-solid fa-circle-check';
+          if (c.type === 'checkbox') typeIcon = 'fa-regular fa-square-check';
+          if (c.type === 'date') typeIcon = 'fa-regular fa-calendar';
+          if (c.type === 'url') typeIcon = 'fa-solid fa-link';
+
+          return `
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <span style="font-size:10px; color:var(--text-secondary); display:flex; align-items:center; gap:4px;">
+                <i class="${typeIcon}" style="font-size:9px; color:var(--accent-primary);"></i>
+                ${escapeHTML(c.name)}
+              </span>
+              <input type="checkbox" class="gallery-prop-check" data-col-id="${c.id}" style="cursor:pointer;" ${isChecked ? 'checked' : ''}>
+            </div>
+          `;
+        }).join('')}
+        ${addableCols.length === 0 ? '<div style="font-size:10px; color:var(--text-muted); text-align:center; padding:4px 0;">表示できる列がありません</div>' : ''}
+      </div>
+    </div>
+    <div class="db-popover-divider" style="margin:4px 0 2px 0;"></div>
+    <button id="btn-save-gallery-options" class="db-filter-apply-btn" style="margin-top:4px; padding:4px 0;">完了</button>
+  `;
+
+  popover.querySelector('#btn-save-gallery-options').addEventListener('click', (evt) => {
+    evt.stopPropagation();
+    const propChecks = popover.querySelectorAll('.gallery-prop-check');
+    const checkedIds = [];
+    propChecks.forEach(chk => {
+      if (chk.checked) {
+        checkedIds.push(chk.getAttribute('data-col-id'));
       }
-      currentWikiLength += len;
-    } else if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('wiki-link')) {
-      const target = node.getAttribute('data-target') || node.textContent;
-      const isJp = node.getAttribute('data-bracket') === 'jp';
-      const openLen = 2; // 「「 または [[
-      const closeLen = 2; // 」」 または ]]
-      const totalWikiLen = openLen + target.length + closeLen;
+    });
+    view.galleryShownColIds = checkedIds;
 
-      if (currentWikiLength + totalWikiLen >= wikiOffset) {
-        if (wikiOffset - currentWikiLength < totalWikiLen / 2) {
-          return { node: node.parentNode, offset: Array.from(node.parentNode.childNodes).indexOf(node) };
-        } else {
-          return { node: node.parentNode, offset: Array.from(node.parentNode.childNodes).indexOf(node) + 1 };
+    popover.remove();
+    saveNotesToStorage();
+    renderEditor();
+  });
+
+  document.body.appendChild(popover);
+}
+
+function renderGalleryViewDOM(block, rowDataList) {
+  const container = document.createElement('div');
+  container.style = 'display:flex; flex-direction:column; gap:8px; width:100%;';
+
+  const headerEl = document.createElement('div');
+  headerEl.className = 'db-gallery-header';
+
+  const optBtn = document.createElement('button');
+  optBtn.className = 'btn-secondary';
+  optBtn.innerHTML = '<i class="fa-solid fa-sliders"></i> 表示オプション';
+  optBtn.style.padding = '4px 8px; font-size:11px;';
+  
+  const activeViewId = block.properties.activeViewId;
+  const activeView = block.properties.views.find(v => v.id === activeViewId) || block.properties.views[0];
+
+  optBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showGalleryOptionsPopover(e, block, activeView);
+  });
+  headerEl.appendChild(optBtn);
+  container.appendChild(headerEl);
+
+  const grid = document.createElement('div');
+  grid.className = 'db-gallery-grid';
+
+  const columns = block.properties.columns || [];
+  
+  // galleryShownColIds が空（未定義または初期状態）なら、セレクトタグとURLタイプの列を表示対象とする
+  const shownColIds = (activeView && activeView.galleryShownColIds && activeView.galleryShownColIds.length > 0)
+    ? activeView.galleryShownColIds
+    : columns.filter(c => c.id !== 'col-title' && (c.type === 'select' || c.type === 'url')).map(c => c.id);
+
+  rowDataList.forEach((row, rowIndex) => {
+    const actualIndex = block.properties.rows.indexOf(row);
+    const card = document.createElement('div');
+    card.className = 'db-gallery-card';
+
+    // 1. 画像URLの特定（ハイブリッドロジック）
+    let imageUrl = '';
+    
+    // (A) 手動で明示的に指定された画像列、または画像っぽさのある列（列名が「画像」「cover」「image」で値があるもの、またはURLの末尾が画像拡張子）
+    const imgCol = columns.find(c => {
+      const name = (c.name || '').toLowerCase();
+      return name === '画像' || name === '画像url' || name === 'cover' || name === 'image';
+    });
+    
+    if (imgCol && row[imgCol.id]) {
+      imageUrl = String(row[imgCol.id]).trim();
+    } else {
+      // (B) 拡張子が画像であるものを値として持つ列を探す
+      for (const col of columns) {
+        const val = String(row[col.id] || '').trim();
+        if (val.match(/\.(jpeg|jpg|gif|png|webp|svg)/i)) {
+          imageUrl = val;
+          break;
         }
       }
-      currentWikiLength += totalWikiLen;
-    } else {
-      for (let i = 0; i < node.childNodes.length; i++) {
-        const res = traverse(node.childNodes[i]);
-        if (res) return res;
+    }
+
+    // (C) 画像URLがない場合、httpで始まる最初のURL列を探して、自動スクリーンショットを撮る
+    let webUrl = '';
+    if (!imageUrl) {
+      for (const col of columns) {
+        const val = String(row[col.id] || '').trim();
+        if (val.startsWith('http://') || val.startsWith('https://')) {
+          webUrl = val;
+          break;
+        }
+      }
+      if (webUrl) {
+        // 無料スクリーンショットAPI thum.io を使用
+        imageUrl = `https://image.thum.io/get/width/400/crop/800/${webUrl}`;
       }
     }
-    return null;
-  }
 
-  return traverse(container);
+    // 2. カバーエリアの描画
+    const coverArea = document.createElement('div');
+    coverArea.className = 'db-gallery-card-cover';
+
+    let isRepositioning = false; // 位置調整中フラグ
+
+    if (imageUrl) {
+      const img = document.createElement('img');
+      img.src = imageUrl;
+      img.alt = 'Cover';
+      img.loading = 'lazy';
+      // 保存されている位置情報と拡大率を適用
+      const currentPosX = row._coverPosX !== undefined ? row._coverPosX : 50;
+      const currentPosY = row._coverPosY !== undefined ? row._coverPosY : 50;
+      const currentScale = row._coverScale !== undefined ? row._coverScale : 100;
+      img.style.objectPosition = `${currentPosX}% ${currentPosY}%`;
+      img.style.transform = `scale(${currentScale / 100})`;
+
+      // エラー発生時はプレースホルダーに切り替えるフォールバック
+      img.onerror = () => {
+        img.remove();
+        const oldRepBtn = coverArea.querySelector('.btn-reposition-cover');
+        if (oldRepBtn) oldRepBtn.remove();
+        coverArea.appendChild(createPlaceholderDOM(webUrl));
+      };
+      coverArea.appendChild(img);
+
+      // 「位置調整」ボタンの追加
+      const repBtn = document.createElement('button');
+      repBtn.className = 'btn-reposition-cover';
+      repBtn.innerHTML = '<i class="fa-solid fa-arrows-up-down"></i>位置調整';
+      repBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // モーダル起動防止
+        isRepositioning = true;
+        
+        repBtn.style.display = 'none';
+
+        // ドラッグ調整用オーバーレイとコントロール
+        const dragOverlay = document.createElement('div');
+        dragOverlay.className = 'reposition-drag-overlay';
+        dragOverlay.textContent = 'ドラッグして位置調整';
+        coverArea.appendChild(dragOverlay);
+
+        // スライダーの追加
+        const sliderContainer = document.createElement('div');
+        sliderContainer.className = 'reposition-scale-slider-container';
+        sliderContainer.innerHTML = '<i class="fa-solid fa-magnifying-glass-plus"></i>';
+        
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'reposition-scale-slider';
+        slider.min = '100';
+        slider.max = '300';
+        slider.value = currentScale;
+        sliderContainer.appendChild(slider);
+        coverArea.appendChild(sliderContainer);
+
+        const controls = document.createElement('div');
+        controls.className = 'reposition-controls';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn-reposition-save';
+        saveBtn.textContent = '保存';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn-reposition-cancel';
+        cancelBtn.textContent = 'キャンセル';
+
+        controls.appendChild(saveBtn);
+        controls.appendChild(cancelBtn);
+        coverArea.appendChild(controls);
+
+        let startX = 0;
+        let startY = 0;
+        let tempPosX = currentPosX;
+        let tempPosY = currentPosY;
+        let tempScale = currentScale;
+
+        slider.addEventListener('input', () => {
+          tempScale = parseInt(slider.value, 10);
+          img.style.transform = `scale(${tempScale / 100})`;
+        });
+
+        const onMouseDown = (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          startX = evt.clientX;
+          startY = evt.clientY;
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
+        };
+
+        const onMouseMove = (evt) => {
+          const deltaX = evt.clientX - startX;
+          const deltaY = evt.clientY - startY;
+          const rect = coverArea.getBoundingClientRect();
+          const coverWidth = rect.width || 240;
+          const coverHeight = rect.height || 140;
+          let offsetPercentX = (deltaX / coverWidth) * 100;
+          let offsetPercentY = (deltaY / coverHeight) * 100;
+          tempPosX = Math.max(0, Math.min(100, currentPosX - offsetPercentX));
+          tempPosY = Math.max(0, Math.min(100, currentPosY - offsetPercentY));
+          img.style.objectPosition = `${tempPosX}% ${tempPosY}%`;
+        };
+
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+        };
+
+        coverArea.style.cursor = 'move';
+        coverArea.addEventListener('mousedown', onMouseDown);
+
+        // 保存の処理
+        saveBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          row._coverPosX = Math.round(tempPosX);
+          row._coverPosY = Math.round(tempPosY);
+          row._coverScale = tempScale;
+          saveNotesToStorage();
+          
+          cleanupReposition();
+          renderEditor(); // 全体再描画
+        });
+
+        // キャンセルの処理
+        cancelBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          img.style.objectPosition = `${currentPosX}% ${currentPosY}%`;
+          img.style.transform = `scale(${currentScale / 100})`;
+          cleanupReposition();
+        });
+
+        function cleanupReposition() {
+          coverArea.style.cursor = '';
+          coverArea.removeEventListener('mousedown', onMouseDown);
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+          dragOverlay.remove();
+          sliderContainer.remove();
+          controls.remove();
+          repBtn.style.display = '';
+          setTimeout(() => {
+            isRepositioning = false;
+          }, 100);
+        }
+      });
+      coverArea.appendChild(repBtn);
+    } else {
+      coverArea.appendChild(createPlaceholderDOM());
+    }
+    card.appendChild(coverArea);
+
+    // 3. 情報エリアの描画
+    const infoArea = document.createElement('div');
+    infoArea.className = 'db-gallery-card-info';
+
+    // タイトルの描画
+    const titleVal = row['col-title'] || '無題';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'db-gallery-card-title';
+    titleEl.textContent = titleVal;
+    infoArea.appendChild(titleEl);
+
+    // 表示に選ばれたプロパティの描画
+    const propsArea = document.createElement('div');
+    propsArea.className = 'db-gallery-card-properties';
+
+    shownColIds.forEach(colId => {
+      const col = columns.find(c => c.id === colId);
+      if (!col) return;
+      const val = row[colId];
+
+      const propRow = document.createElement('div');
+      propRow.className = 'db-gallery-card-property-item';
+
+      const label = document.createElement('div');
+      propRow.appendChild(label);
+      label.className = 'db-gallery-card-property-label';
+      label.textContent = col.name;
+
+      const valContainer = document.createElement('div');
+      valContainer.className = 'db-gallery-card-property-value';
+
+      // タイプ別バッジ・リンク描画
+      if (val !== undefined && val !== null && val !== '') {
+        if (col.type === 'status') {
+          const optName = getStatusOptionName(col, val);
+          const color = getStatusOptionColor(col, val);
+          const badge = document.createElement('span');
+          badge.className = `db-status-badge status-${color}`;
+          badge.textContent = optName;
+          valContainer.appendChild(badge);
+        } else if (col.type === 'select') {
+          const tags = String(val || '').split(',').map(t => t.trim()).filter(Boolean);
+          if (tags.length === 0) {
+            const badge = document.createElement('span');
+            badge.className = 'db-select-badge db-tag-gray';
+            badge.style.opacity = '0.5';
+            badge.style.fontStyle = 'italic';
+            badge.textContent = 'なし';
+            badge.style.cursor = 'pointer';
+            badge.addEventListener('click', (e) => {
+              e.stopPropagation();
+              showSelectTagPopover(e, block, actualIndex, col.id, col.options || []);
+            });
+            valContainer.appendChild(badge);
+          } else {
+            tags.forEach(tagVal => {
+              const color = getTagColor(col, tagVal);
+              const badge = document.createElement('span');
+              badge.className = `db-select-badge db-tag-${color}`;
+              badge.textContent = tagVal;
+              badge.style.cursor = 'pointer';
+
+              const removeBtn = document.createElement('span');
+              removeBtn.className = 'btn-remove-tag';
+              removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+              removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                pushHistory();
+                const newTags = tags.filter(t => t !== tagVal);
+                row[col.id] = newTags.join(', ');
+                saveNotesToStorage();
+                renderEditor();
+              });
+              badge.appendChild(removeBtn);
+              
+              badge.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showSelectTagPopover(e, block, actualIndex, col.id, col.options || []);
+              });
+
+              valContainer.appendChild(badge);
+            });
+          }
+        } else if (col.type === 'checkbox') {
+          const checkIcon = document.createElement('i');
+          checkIcon.className = val ? 'fa-regular fa-square-check' : 'fa-regular fa-square';
+          checkIcon.style.color = val ? 'var(--accent-primary)' : 'var(--text-muted)';
+          valContainer.appendChild(checkIcon);
+        } else if (col.type === 'url') {
+          const strVal = String(val);
+          const link = document.createElement('a');
+          link.href = (strVal.startsWith('http://') || strVal.startsWith('https://')) ? strVal : `https://${strVal}`;
+          link.target = '_blank';
+          link.className = 'external-link-card';
+          link.textContent = strVal;
+          link.addEventListener('click', (e) => {
+            e.stopPropagation();
+          });
+          valContainer.appendChild(link);
+        } else {
+          const strVal = String(val);
+          if (strVal.startsWith('http://') || strVal.startsWith('https://')) {
+            const link = document.createElement('a');
+            link.href = strVal;
+            link.target = '_blank';
+            link.className = 'external-link-card';
+            link.textContent = strVal;
+            link.addEventListener('click', (e) => {
+              e.stopPropagation();
+            });
+            valContainer.appendChild(link);
+          } else {
+            valContainer.textContent = strVal;
+          }
+        }
+      } else {
+        valContainer.innerHTML = '<span style="color:var(--text-muted); font-style:italic; font-size:10px;">なし</span>';
+      }
+
+      propRow.appendChild(valContainer);
+      propsArea.appendChild(propRow);
+    });
+
+    infoArea.appendChild(propsArea);
+    card.appendChild(infoArea);
+
+    card.addEventListener('click', () => {
+      if (isRepositioning) return;
+      showDbRowEditModal(block, row, rowIndex);
+    });
+
+    grid.appendChild(card);
+  });
+
+  // 末尾に「＋ 新規」カードの描画
+  const addCard = document.createElement('div');
+  addCard.className = 'db-gallery-card db-gallery-add-card';
+  addCard.innerHTML = `<i class="fa-solid fa-plus"></i><span>新規追加</span>`;
+  addCard.addEventListener('click', () => {
+    const newRow = {};
+    columns.forEach(col => {
+      if (col.type === 'status') {
+        const defaultOpt = col.options && col.options.length > 0 ? col.options[0].name : '未着手';
+        newRow[col.id] = defaultOpt;
+      } else if (col.type === 'checkbox') {
+        newRow[col.id] = false;
+      } else {
+        newRow[col.id] = '';
+      }
+    });
+
+    block.properties.rows = block.properties.rows || [];
+    block.properties.rows.push(newRow);
+    saveNotesToStorage();
+    renderEditor();
+
+    const newRowIndex = block.properties.rows.length - 1;
+    showDbRowEditModal(block, newRow, newRowIndex);
+  });
+  grid.appendChild(addCard);
+
+  container.appendChild(grid);
+  return container;
 }
 
 // CSV parsing RFC4180 compliant helper
@@ -7445,4 +8038,783 @@ function importFromCSV(block, file) {
     showToast('CSVデータをインポートしました。');
   };
   reader.readAsText(file);
+}
+
+
+
+function createPlaceholderDOM(webUrl = '') {
+  const placeholder = document.createElement('div');
+  placeholder.className = 'db-gallery-card-cover-placeholder';
+  
+  const icon = document.createElement('i');
+  if (webUrl) {
+    icon.className = 'fa-solid fa-globe';
+  } else {
+    icon.className = 'fa-regular fa-image';
+  }
+  placeholder.appendChild(icon);
+
+  const label = document.createElement('span');
+  label.textContent = webUrl ? 'No Image (Web)' : 'No Image';
+  placeholder.appendChild(label);
+
+  return placeholder;
+}
+
+function getOrCreateImageColumn(block) {
+  block.properties.columns = block.properties.columns || [];
+  let col = block.properties.columns.find(c => {
+    const name = (c.name || '').toLowerCase();
+    return name === '画像' || name === '画像url' || name === 'cover' || name === 'image' || name === 'url';
+  });
+  if (!col) {
+    col = {
+      id: 'col-' + generateId(),
+      name: '画像',
+      type: 'url',
+      width: 130
+    };
+    block.properties.columns.push(col);
+  }
+  return col;
+}
+
+function showDbRowEditModal(block, row, rowIndex) {
+  const existing = document.querySelector('.db-modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'db-modal-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = 'db-modal-content';
+
+  const header = document.createElement('div');
+  header.className = 'db-modal-header';
+  
+  const title = document.createElement('div');
+  title.className = 'db-modal-title';
+  title.textContent = 'プロパティを編集';
+  header.appendChild(title);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'db-modal-close-btn';
+  closeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+  closeBtn.addEventListener('click', () => {
+    overlay.remove();
+  });
+  header.appendChild(closeBtn);
+
+  modal.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'db-modal-body';
+
+  const columns = block.properties.columns || [];
+
+  // 画像列の特定
+  const imgCol = getOrCreateImageColumn(block);
+
+  // 初期表示する列のIDリスト (名前、セレクトタグ、URLのみ、ただし画像列は除く)
+  let displayedColIds = columns
+    .filter(col => (col.id === 'col-title' || col.type === 'select' || col.type === 'url') && col.id !== imgCol.id)
+    .map(col => col.id);
+
+  if (!displayedColIds.includes('col-title') && columns.find(c => c.id === 'col-title')) {
+    displayedColIds.unshift('col-title');
+  }
+
+  // --- カバー画像セクション ---
+  const coverSection = document.createElement('div');
+  coverSection.className = 'db-modal-cover-section';
+
+  const previewWrapper = document.createElement('div');
+  previewWrapper.className = 'db-modal-cover-preview-wrapper';
+  coverSection.appendChild(previewWrapper);
+
+  function updateCoverPreview() {
+    previewWrapper.innerHTML = '';
+    let imageUrl = '';
+    if (imgCol && row[imgCol.id]) {
+      imageUrl = String(row[imgCol.id]).trim();
+    }
+    
+    // もし指定された値が画像URLではなく通常のWeb URLの場合、自動スクリーンショットを表示する
+    if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) && !imageUrl.match(/\.(jpeg|jpg|gif|png|webp|svg)/i) && !imageUrl.startsWith('data:image/')) {
+      imageUrl = `https://image.thum.io/get/width/400/crop/800/${imageUrl}`;
+    }
+    
+    if (!imageUrl) {
+      let webUrl = '';
+      for (const col of columns) {
+        if (col.id === imgCol.id) continue;
+        const val = String(row[col.id] || '').trim();
+        if (val.startsWith('http://') || val.startsWith('https://')) {
+          webUrl = val;
+          break;
+        }
+      }
+      if (webUrl) {
+        imageUrl = `https://image.thum.io/get/width/400/crop/800/${webUrl}`;
+      }
+    }
+
+    if (imageUrl) {
+      const img = document.createElement('img');
+      img.src = imageUrl;
+      const currentPosX = row._coverPosX !== undefined ? row._coverPosX : 50;
+      const currentPosY = row._coverPosY !== undefined ? row._coverPosY : 50;
+      const currentScale = row._coverScale !== undefined ? row._coverScale : 100;
+      img.style.objectPosition = `${currentPosX}% ${currentPosY}%`;
+      img.style.transform = `scale(${currentScale / 100})`;
+      previewWrapper.appendChild(img);
+
+      // --- 位置調整ボタンを追加 ---
+      const repBtn = document.createElement('button');
+      repBtn.className = 'btn-reposition-cover';
+      repBtn.innerHTML = '<i class="fa-solid fa-arrows-up-down"></i>位置調整';
+      
+      repBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        repBtn.style.display = 'none';
+
+        // ドラッグ調整用オーバーレイ
+        const dragOverlay = document.createElement('div');
+        dragOverlay.className = 'reposition-drag-overlay';
+        dragOverlay.textContent = 'ドラッグして位置調整';
+        previewWrapper.appendChild(dragOverlay);
+
+        // スライダーの追加
+        const sliderContainer = document.createElement('div');
+        sliderContainer.className = 'reposition-scale-slider-container';
+        sliderContainer.innerHTML = '<i class="fa-solid fa-magnifying-glass-plus"></i>';
+        
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'reposition-scale-slider';
+        slider.min = '100';
+        slider.max = '300';
+        slider.value = currentScale;
+        sliderContainer.appendChild(slider);
+        previewWrapper.appendChild(sliderContainer);
+
+        // ボタンコントロール
+        const controls = document.createElement('div');
+        controls.className = 'reposition-controls';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn-reposition-save';
+        saveBtn.textContent = '保存';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn-reposition-cancel';
+        cancelBtn.textContent = 'キャンセル';
+
+        controls.appendChild(saveBtn);
+        controls.appendChild(cancelBtn);
+        previewWrapper.appendChild(controls);
+
+        let startX = 0;
+        let startY = 0;
+        let tempPosX = currentPosX;
+        let tempPosY = currentPosY;
+        let tempScale = currentScale;
+
+        slider.addEventListener('input', () => {
+          tempScale = parseInt(slider.value, 10);
+          img.style.transform = `scale(${tempScale / 100})`;
+        });
+
+        const onMouseDown = (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          startX = evt.clientX;
+          startY = evt.clientY;
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
+        };
+
+        const onMouseMove = (evt) => {
+          const deltaX = evt.clientX - startX;
+          const deltaY = evt.clientY - startY;
+          const rect = previewWrapper.getBoundingClientRect();
+          const coverWidth = rect.width || 240;
+          const coverHeight = rect.height || 120;
+          let offsetPercentX = (deltaX / coverWidth) * 100;
+          let offsetPercentY = (deltaY / coverHeight) * 100;
+          tempPosX = Math.max(0, Math.min(100, currentPosX - offsetPercentX));
+          tempPosY = Math.max(0, Math.min(100, currentPosY - offsetPercentY));
+          img.style.objectPosition = `${tempPosX}% ${tempPosY}%`;
+        };
+
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+        };
+
+        previewWrapper.style.cursor = 'move';
+        previewWrapper.addEventListener('mousedown', onMouseDown);
+
+        // 保存
+        saveBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          row._coverPosX = Math.round(tempPosX);
+          row._coverPosY = Math.round(tempPosY);
+          row._coverScale = tempScale;
+          saveNotesToStorage();
+          
+          cleanupReposition();
+          renderEditor(); // 全体再描画
+        });
+
+        // キャンセル
+        cancelBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          img.style.objectPosition = `${currentPosX}% ${currentPosY}%`;
+          img.style.transform = `scale(${currentScale / 100})`;
+          cleanupReposition();
+        });
+
+        function cleanupReposition() {
+          previewWrapper.style.cursor = '';
+          previewWrapper.removeEventListener('mousedown', onMouseDown);
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+          dragOverlay.remove();
+          sliderContainer.remove();
+          controls.remove();
+          repBtn.style.display = '';
+        }
+      });
+
+      previewWrapper.appendChild(repBtn);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.style.color = 'rgba(255, 255, 255, 0.2)';
+      placeholder.style.display = 'flex';
+      placeholder.style.flexDirection = 'column';
+      placeholder.style.alignItems = 'center';
+      placeholder.style.gap = '8px';
+      placeholder.innerHTML = '<i class="fa-regular fa-image" style="font-size:24px;"></i><span style="font-size:10px; text-transform:uppercase; letter-spacing:1px;">No Cover Image</span>';
+      previewWrapper.appendChild(placeholder);
+    }
+  }
+
+  updateCoverPreview();
+
+  // モーダルカバー下のURL統合レイアウト
+  const coverUrlRow = document.createElement('div');
+  coverUrlRow.className = 'db-modal-cover-url-row';
+
+  const coverUrlLabel = document.createElement('div');
+  coverUrlLabel.className = 'db-modal-cover-url-label';
+  coverUrlLabel.innerHTML = `<i class="fa-solid fa-link"></i> <span>URL</span>`;
+  coverUrlRow.appendChild(coverUrlLabel);
+
+  const coverUrlControls = document.createElement('div');
+  coverUrlControls.className = 'db-modal-cover-url-controls';
+
+  const coverUrlInput = document.createElement('input');
+  coverUrlInput.type = 'text';
+  coverUrlInput.className = 'db-modal-input-text';
+  coverUrlInput.placeholder = '画像URLを入力... (https://example.com)';
+  
+  const currentImgVal = row[imgCol.id] !== undefined ? row[imgCol.id] : '';
+  if (currentImgVal) {
+    if (String(currentImgVal).startsWith('data:image/')) {
+      coverUrlInput.placeholder = 'ローカル画像が設定されています (URLを入力して上書き)';
+      coverUrlInput.value = '';
+    } else {
+      coverUrlInput.value = currentImgVal;
+    }
+  }
+
+  // 外部リンクボタン
+  const linkBtn = document.createElement('a');
+  linkBtn.target = '_blank';
+  linkBtn.className = 'db-modal-url-link-btn';
+  linkBtn.title = '新しいタブで開く';
+  linkBtn.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square"></i>';
+  linkBtn.style.display = 'none';
+
+  function updateLinkBtn() {
+    const val = coverUrlInput.value.trim();
+    if (val && (val.startsWith('http://') || val.startsWith('https://'))) {
+      linkBtn.href = val;
+      linkBtn.style.display = 'inline-flex';
+    } else {
+      linkBtn.style.display = 'none';
+    }
+  }
+
+  updateLinkBtn();
+
+  coverUrlInput.addEventListener('change', () => {
+    const newVal = coverUrlInput.value.trim();
+    pushHistory();
+    row[imgCol.id] = newVal;
+    saveNotesToStorage();
+    updateCoverPreview();
+    updateLinkBtn();
+    renderEditor();
+  });
+
+  coverUrlControls.appendChild(coverUrlInput);
+
+  // ファイルインプット
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.style.display = 'none';
+
+  const uploadBtn = document.createElement('div');
+  uploadBtn.className = 'btn-upload-cover-dummy';
+  uploadBtn.innerHTML = '<i class="fa-solid fa-upload" style="margin-right:4px;"></i>アップロード';
+  uploadBtn.addEventListener('click', () => {
+    fileInput.click();
+  });
+  coverUrlControls.appendChild(uploadBtn);
+  coverUrlControls.appendChild(linkBtn);
+  coverUrlControls.appendChild(fileInput);
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxW = 800;
+        
+        if (width > maxW) {
+          height = Math.round((height * maxW) / width);
+          width = maxW;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        const base64 = canvas.toDataURL('image/jpeg', 0.8);
+        
+        pushHistory();
+        row[imgCol.id] = base64;
+        saveNotesToStorage();
+        
+        coverUrlInput.value = '';
+        coverUrlInput.placeholder = 'ローカル画像が設定されています (URLを入力して上書き)';
+        
+        updateCoverPreview();
+        updateLinkBtn();
+        renderEditor();
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  coverUrlRow.appendChild(coverUrlControls);
+  coverSection.appendChild(coverUrlRow);
+  body.appendChild(coverSection);
+
+  // --- プロパティ表示コンテナとレンダラー ---
+  const propertiesContainer = document.createElement('div');
+  propertiesContainer.className = 'db-modal-properties-container';
+  propertiesContainer.style.display = 'flex';
+  propertiesContainer.style.flexDirection = 'column';
+  propertiesContainer.style.gap = '16px';
+  body.appendChild(propertiesContainer);
+
+  function renderModalProperties() {
+    propertiesContainer.innerHTML = '';
+    
+    // columnsの並び順に従って表示
+    const sortedCols = columns.filter(c => displayedColIds.includes(c.id));
+    
+    sortedCols.forEach(col => {
+      const rowWrapper = document.createElement('div');
+      rowWrapper.className = 'db-modal-property-row';
+
+      const label = document.createElement('label');
+      label.className = 'db-modal-property-label';
+      label.style.display = 'flex';
+      label.style.justifyContent = 'space-between';
+      label.style.alignItems = 'center';
+      label.style.width = '100%';
+      
+      const labelLeft = document.createElement('span');
+      labelLeft.style.display = 'flex';
+      labelLeft.style.alignItems = 'center';
+      labelLeft.style.gap = '6px';
+      
+      let iconClass = 'fa-regular fa-file-lines';
+      if (col.type === 'number') iconClass = 'fa-solid fa-hashtag';
+      if (col.type === 'select') iconClass = 'fa-solid fa-list-ul';
+      if (col.type === 'status') iconClass = 'fa-solid fa-circle-check';
+      if (col.type === 'date') iconClass = 'fa-regular fa-calendar';
+      if (col.type === 'checkbox') iconClass = 'fa-regular fa-square-check';
+      if (col.type === 'url') iconClass = 'fa-solid fa-link';
+
+      labelLeft.innerHTML = `<i class="${iconClass}"></i><span>${col.name}</span>`;
+      label.appendChild(labelLeft);
+
+      if (col.id !== 'col-title') {
+        const hideBtn = document.createElement('button');
+        hideBtn.className = 'btn-hide-property-modal';
+        hideBtn.title = 'このプロパティを一時的に非表示にする';
+        hideBtn.innerHTML = '<i class="fa-regular fa-eye-slash"></i>';
+        hideBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          displayedColIds = displayedColIds.filter(id => id !== col.id);
+          renderModalProperties();
+        });
+        label.appendChild(hideBtn);
+      }
+
+      rowWrapper.appendChild(label);
+
+      const inputWrapper = document.createElement('div');
+      inputWrapper.className = 'db-modal-property-input-wrapper';
+
+      const currentVal = row[col.id] !== undefined ? row[col.id] : '';
+
+      if (col.type === 'checkbox') {
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.className = 'db-modal-input-checkbox';
+        chk.checked = !!currentVal;
+        chk.addEventListener('change', () => {
+          pushHistory();
+          row[col.id] = chk.checked;
+          saveNotesToStorage();
+          renderEditor();
+        });
+        inputWrapper.appendChild(chk);
+      } else if (col.type === 'status') {
+        const select = document.createElement('select');
+        select.className = 'db-modal-input-text';
+        
+        const options = col.options || [];
+        options.forEach(opt => {
+          const option = document.createElement('option');
+          option.value = opt.name;
+          option.textContent = opt.name;
+          option.selected = currentVal === opt.name || currentVal === opt.id;
+          select.appendChild(option);
+        });
+
+        select.addEventListener('change', () => {
+          pushHistory();
+          row[col.id] = select.value;
+          saveNotesToStorage();
+          renderEditor();
+        });
+        inputWrapper.appendChild(select);
+      } else if (col.type === 'select') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'db-modal-select-wrapper';
+        wrapper.style.display = 'flex';
+        wrapper.style.flexWrap = 'wrap';
+        wrapper.style.gap = '6px';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.minHeight = '32px';
+
+        const tags = String(currentVal || '').split(',').map(t => t.trim()).filter(Boolean);
+        if (tags.length === 0) {
+          const noTagBadge = document.createElement('span');
+          noTagBadge.className = 'db-select-badge db-tag-gray';
+          noTagBadge.style.opacity = '0.5';
+          noTagBadge.style.fontStyle = 'italic';
+          noTagBadge.textContent = '選択なし';
+          wrapper.appendChild(noTagBadge);
+        } else {
+          tags.forEach(tagVal => {
+            const badge = document.createElement('span');
+            badge.className = `db-select-badge db-tag-${getTagColor(col, tagVal)}`;
+            badge.textContent = tagVal;
+            
+            const removeBtn = document.createElement('span');
+            removeBtn.className = 'btn-remove-tag';
+            removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            removeBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              pushHistory();
+              const newTags = tags.filter(t => t !== tagVal);
+              row[col.id] = newTags.join(', ');
+              saveNotesToStorage();
+              renderEditor();
+              renderModalProperties();
+            });
+            badge.appendChild(removeBtn);
+            wrapper.appendChild(badge);
+          });
+        }
+
+        const addTagBtn = document.createElement('button');
+        addTagBtn.className = 'btn-add-tag-modal';
+        addTagBtn.innerHTML = '<i class="fa-solid fa-plus"></i> タグを追加';
+        addTagBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showSelectTagPopover(e, block, rowIndex, col.id, col.options || []);
+        });
+        wrapper.appendChild(addTagBtn);
+
+        inputWrapper.appendChild(wrapper);
+      } else if (col.type === 'date') {
+        const input = document.createElement('input');
+        input.type = 'date';
+        input.className = 'db-modal-input-text';
+        input.value = currentVal;
+        input.addEventListener('change', () => {
+          pushHistory();
+          row[col.id] = input.value;
+          saveNotesToStorage();
+          renderEditor();
+        });
+        inputWrapper.appendChild(input);
+      } else if (col.type === 'number') {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'db-modal-input-text';
+        input.value = currentVal;
+        input.addEventListener('change', () => {
+          pushHistory();
+          const num = parseFloat(input.value);
+          row[col.id] = isNaN(num) ? '' : num;
+          saveNotesToStorage();
+          renderEditor();
+        });
+        inputWrapper.appendChild(input);
+      } else if (col.type === 'url') {
+        const urlWrapper = document.createElement('div');
+        urlWrapper.className = 'db-modal-url-wrapper';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'db-modal-input-text';
+        input.value = currentVal;
+        input.placeholder = 'URLを入力... (https://example.com)';
+        input.addEventListener('change', () => {
+          pushHistory();
+          row[col.id] = input.value.trim();
+          saveNotesToStorage();
+          renderEditor();
+        });
+        urlWrapper.appendChild(input);
+
+        if (currentVal && (String(currentVal).startsWith('http://') || String(currentVal).startsWith('https://'))) {
+          const linkBtn = document.createElement('a');
+          linkBtn.href = currentVal;
+          linkBtn.target = '_blank';
+          linkBtn.className = 'db-modal-url-link-btn';
+          linkBtn.title = '新しいタブで開く';
+          linkBtn.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square"></i>';
+          urlWrapper.appendChild(linkBtn);
+        }
+
+        inputWrapper.appendChild(urlWrapper);
+      } else {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'db-modal-input-text';
+        input.value = currentVal;
+        input.addEventListener('change', () => {
+          pushHistory();
+          row[col.id] = input.value.trim();
+          saveNotesToStorage();
+          renderEditor();
+        });
+        inputWrapper.appendChild(input);
+      }
+
+      rowWrapper.appendChild(inputWrapper);
+      propertiesContainer.appendChild(rowWrapper);
+    });
+  }
+
+  renderModalProperties();
+
+  // --- プロパティ追加ボタン ---
+  const addPropBtn = document.createElement('button');
+  addPropBtn.className = 'btn-add-property-modal';
+  addPropBtn.innerHTML = '<i class="fa-solid fa-plus"></i>プロパティを追加';
+  addPropBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    
+    const oldDropdown = document.querySelector('.db-modal-property-dropdown');
+    if (oldDropdown) oldDropdown.remove();
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'db-modal-property-dropdown';
+
+    const rect = addPropBtn.getBoundingClientRect();
+    dropdown.style.left = `${rect.left + window.scrollX}px`;
+    dropdown.style.top = `${rect.bottom + window.scrollY + 4}px`;
+
+    // 1. 未表示の既存プロパティ
+    const hiddenCols = columns.filter(c => !displayedColIds.includes(c.id) && c.id !== imgCol.id);
+    if (hiddenCols.length > 0) {
+      const gHeader = document.createElement('div');
+      gHeader.style = 'font-size: 10px; color: var(--text-muted); padding: 4px 8px; font-weight: bold; border-bottom: 1px solid var(--border-light);';
+      gHeader.textContent = '既存のプロパティを表示';
+      dropdown.appendChild(gHeader);
+
+      hiddenCols.forEach(col => {
+        const item = document.createElement('div');
+        item.className = 'db-modal-property-dropdown-item';
+        
+        let iconClass = 'fa-regular fa-file-lines';
+        if (col.type === 'number') iconClass = 'fa-solid fa-hashtag';
+        if (col.type === 'select') iconClass = 'fa-solid fa-list-ul';
+        if (col.type === 'status') iconClass = 'fa-solid fa-circle-check';
+        if (col.type === 'date') iconClass = 'fa-regular fa-calendar';
+        if (col.type === 'checkbox') iconClass = 'fa-regular fa-square-check';
+        if (col.type === 'url') iconClass = 'fa-solid fa-link';
+
+        item.innerHTML = `<i class="${iconClass}"></i><span>${col.name}</span>`;
+        item.addEventListener('click', () => {
+          displayedColIds.push(col.id);
+          renderModalProperties();
+          dropdown.remove();
+        });
+        dropdown.appendChild(item);
+      });
+    }
+
+    // 2. 新規プロパティの作成（「＋ 新規プロパティを追加」のみ表記、クリックでタイプ切り替え）
+    const newHeader = document.createElement('div');
+    newHeader.style = 'font-size: 10px; color: var(--text-muted); padding: 6px 8px 4px 8px; font-weight: bold; border-top: 1px solid var(--border-light); border-bottom: 1px solid var(--border-light); margin-top: 4px;';
+    newHeader.textContent = '新規プロパティ';
+    dropdown.appendChild(newHeader);
+
+    const addNewPropItem = document.createElement('div');
+    addNewPropItem.className = 'db-modal-property-dropdown-item';
+    addNewPropItem.innerHTML = `<i class="fa-solid fa-plus"></i><span>新規プロパティを追加</span>`;
+    addNewPropItem.style.fontWeight = 'bold';
+    addNewPropItem.style.color = 'var(--accent-primary, #8b5cf6)';
+    
+    addNewPropItem.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      renderTypeSelection();
+    });
+    dropdown.appendChild(addNewPropItem);
+
+    function renderTypeSelection() {
+      dropdown.innerHTML = '';
+      
+      const backHeader = document.createElement('div');
+      backHeader.style = 'font-size: 10px; color: var(--text-muted); padding: 4px 8px; font-weight: bold; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 4px; cursor: pointer;';
+      backHeader.innerHTML = '<i class="fa-solid fa-arrow-left"></i> 戻る';
+      backHeader.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        dropdown.remove();
+        addPropBtn.click();
+      });
+      dropdown.appendChild(backHeader);
+
+      const types = [
+        { name: 'テキスト', type: 'text', icon: 'fa-regular fa-file-lines' },
+        { name: '数値', type: 'number', icon: 'fa-solid fa-hashtag' },
+        { name: 'セレクト', type: 'select', icon: 'fa-solid fa-list-ul' },
+        { name: 'ステータス', type: 'status', icon: 'fa-solid fa-circle-check' },
+        { name: '日付', type: 'date', icon: 'fa-regular fa-calendar' },
+        { name: 'チェックボックス', type: 'checkbox', icon: 'fa-regular fa-square-check' },
+        { name: 'URL', type: 'url', icon: 'fa-solid fa-link' }
+      ];
+
+      types.forEach(t => {
+        const item = document.createElement('div');
+        item.className = 'db-modal-property-dropdown-item';
+        item.innerHTML = `<i class="${t.icon}"></i><span>${t.name}</span>`;
+        item.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          const propName = prompt(`新規作成する「${t.name}」プロパティの名前を入力してください:`, `新規${t.name}`);
+          if (!propName) return;
+
+          pushHistory();
+          const newColId = 'col-' + generateId();
+          const newCol = {
+            id: newColId,
+            name: propName.trim(),
+            type: t.type,
+            width: 130
+          };
+
+          if (t.type === 'status') {
+            newCol.options = [
+              { id: 'opt-todo', name: '未着手', color: 'gray' },
+              { id: 'opt-progress', name: '進行中', color: 'blue' },
+              { id: 'opt-complete', name: '完了', color: 'green' }
+            ];
+          }
+
+          block.properties.columns.push(newCol);
+          displayedColIds.push(newColId);
+          
+          saveNotesToStorage();
+          renderModalProperties();
+          renderEditor();
+          dropdown.remove();
+        });
+        dropdown.appendChild(item);
+      });
+    }
+
+    document.body.appendChild(dropdown);
+
+    const closeDropdown = (evt) => {
+      if (!dropdown.contains(evt.target) && evt.target !== addPropBtn) {
+        dropdown.remove();
+        document.removeEventListener('click', closeDropdown);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', closeDropdown);
+    }, 0);
+  });
+  body.appendChild(addPropBtn);
+
+  modal.appendChild(body);
+
+  // --- フッター ---
+  const footer = document.createElement('div');
+  footer.className = 'db-modal-footer';
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'db-modal-delete-btn';
+  deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i> この行を削除';
+  deleteBtn.addEventListener('click', () => {
+    pushHistory();
+    block.properties.rows.splice(rowIndex, 1);
+    saveNotesToStorage();
+    renderEditor();
+    overlay.remove();
+  });
+  footer.appendChild(deleteBtn);
+
+  const doneBtn = document.createElement('button');
+  doneBtn.className = 'db-modal-done-btn';
+  doneBtn.textContent = '完了';
+  doneBtn.addEventListener('click', () => {
+    overlay.remove();
+  });
+  footer.appendChild(doneBtn);
+
+  modal.appendChild(footer);
+
+  overlay.appendChild(modal);
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      overlay.remove();
+    }
+  });
+
+  document.body.appendChild(overlay);
 }

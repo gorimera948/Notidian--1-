@@ -3997,3 +3997,759 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 50%;
 }
+
+/* ==========================================
+   DATABASE GALLERY VIEW & DETAILED MODAL STYLES
+   ========================================== */
+
+/* ギャラリーコンテナ */
+.db-gallery-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* ギャラリーグリッド */
+.db-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+/* カード共通 */
+.db-gallery-card {
+  background: rgba(31, 41, 55, 0.4);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+  min-height: 240px;
+}
+
+.db-gallery-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent-primary, #8b5cf6);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(139, 92, 246, 0.15);
+}
+
+/* カバー画像エリア */
+.db-gallery-card-cover {
+  height: 140px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15));
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.db-gallery-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.db-gallery-card:hover .db-gallery-card-cover img {
+  transform: scale(1.05);
+}
+
+/* プレースホルダー（画像がない場合） */
+.db-gallery-card-cover-placeholder {
+  font-size: 32px;
+  color: rgba(255, 255, 255, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-gallery-card-cover-placeholder span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* カード情報エリア */
+.db-gallery-card-info {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-grow: 1;
+}
+
+/* カードタイトル */
+.db-gallery-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #f3f4f6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* プロパティ一覧 */
+.db-gallery-card-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.db-gallery-card-property-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+}
+
+.db-gallery-card-property-label {
+  color: var(--text-muted, #9ca3af);
+  width: 70px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-gallery-card-property-value {
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary, #e5e7eb);
+  display: flex;
+  align-items: center;
+}
+
+/* 外部リンク */
+.db-gallery-card-property-value a.external-link-card {
+  color: #c084fc;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(192, 132, 252, 0.4);
+  transition: all 0.2s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-gallery-card-property-value a.external-link-card:hover {
+  color: #f472b6;
+  border-bottom: 1px solid #f472b6;
+}
+
+/* 新規追加用ダミーカード */
+.db-gallery-add-card {
+  border: 2px dashed rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.02);
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.db-gallery-add-card:hover {
+  border-color: var(--accent-primary, #8b5cf6);
+  background: rgba(139, 92, 246, 0.05);
+  color: var(--text-primary);
+}
+
+.db-gallery-add-card i {
+  font-size: 18px;
+}
+
+/* 詳細編集モーダル */
+.db-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.db-modal-content {
+  background: rgba(13, 17, 28, 0.95);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 12px;
+  width: 520px;
+  max-width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.8), 0 0 25px rgba(139, 92, 246, 0.2);
+  display: flex;
+  flex-direction: column;
+  animation: dbPopoverFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.db-modal-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.db-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.db-modal-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.db-modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.db-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.db-modal-property-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.db-modal-property-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+}
+
+.db-modal-property-input-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.db-modal-input-text {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  color: #fff;
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.db-modal-input-text:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 6px rgba(139, 92, 246, 0.3);
+}
+
+.db-modal-input-checkbox {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+}
+
+.db-modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.db-modal-delete-btn {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.db-modal-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.8);
+  color: #fff;
+}
+
+.db-modal-done-btn {
+  background: var(--accent-primary, #8b5cf6);
+  color: #fff;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.db-modal-done-btn:hover {
+  background: #a78bfa;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+}
+
+/* ==========================================
+   DATABASE URL TYPE STYLES
+   ========================================== */
+
+/* URLセルのポジショニングとパディング */
+.notion-db-table td.cell-type-url {
+  position: relative;
+  padding-right: 28px !important;
+}
+
+/* 外部リンクボタン */
+.db-cell-link-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted, #9ca3af);
+  text-decoration: none;
+  font-size: 10px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.db-cell-link-btn:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: var(--accent-primary, #8b5cf6);
+  color: #fff;
+}
+
+/* モーダル内のURLプロパティ用 */
+.db-modal-url-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.db-modal-url-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted, #9ca3af);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.db-modal-url-link-btn:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: var(--accent-primary, #8b5cf6);
+  color: #fff;
+}
+
+/* ==========================================
+   DATABASE GALLERY ADVANCED STYLES (REPOSITION & PROPERTY TOGGLE)
+   ========================================== */
+
+/* カバー画像位置調整（Reposition）ボタン */
+.btn-reposition-cover {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(13, 17, 28, 0.75);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.15s;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.db-gallery-card-cover:hover .btn-reposition-cover {
+  opacity: 1;
+}
+
+.btn-reposition-cover:hover {
+  background: rgba(139, 92, 246, 0.4);
+  border-color: var(--accent-primary, #8b5cf6);
+}
+
+/* 位置調整中のオーバーレイ */
+.reposition-drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  z-index: 8;
+  letter-spacing: 0.5px;
+}
+
+/* 位置調整中の制御ボタン */
+.reposition-controls {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 6px;
+  z-index: 15;
+}
+
+.btn-reposition-save,
+.btn-reposition-cancel {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+}
+
+.btn-reposition-save {
+  background: var(--accent-primary, #8b5cf6);
+  color: #fff;
+}
+
+.btn-reposition-save:hover {
+  background: #a78bfa;
+  box-shadow: 0 0 6px rgba(139, 92, 246, 0.4);
+}
+
+.btn-reposition-cancel {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.btn-reposition-cancel:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 詳細モーダル内のカバー画像編集セクション */
+.db-modal-cover-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 16px;
+}
+
+.db-modal-cover-preview-wrapper {
+  height: 120px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.15));
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative; /* Position relative to allow absolute child buttons */
+}
+
+.db-modal-cover-preview-wrapper:hover .btn-reposition-cover {
+  opacity: 1;
+}
+
+.db-modal-cover-preview-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.db-modal-cover-inputs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ファイル選択のダミーボタン風 */
+.btn-upload-cover-dummy {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted, #9ca3af);
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-upload-cover-dummy:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: var(--accent-primary, #8b5cf6);
+  color: #fff;
+}
+
+/* プロパティ追加ボタン */
+.btn-add-property-modal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  color: var(--text-muted, #9ca3af);
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.2s;
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
+.btn-add-property-modal:hover {
+  border-color: var(--accent-primary, #8b5cf6);
+  color: #fff;
+  background: rgba(139, 92, 246, 0.05);
+}
+
+/* プロパティ追加ポップオーバー */
+.db-modal-property-dropdown {
+  position: absolute;
+  background: rgba(13, 17, 28, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 180px;
+  max-height: 250px;
+  overflow-y: auto;
+  animation: dbPopoverFadeIn 0.2s ease;
+}
+
+.db-modal-property-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background 0.15s;
+}
+
+.db-modal-property-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.db-modal-property-dropdown-item i {
+  color: var(--text-muted);
+}
+
+/* 位置調整スライダーコンテナ */
+.reposition-scale-slider-container {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(13, 17, 28, 0.85);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: #fff;
+  font-size: 10px;
+  z-index: 15;
+}
+
+.reposition-scale-slider {
+  width: 70px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  accent-color: var(--accent-primary, #8b5cf6);
+}
+
+/* モーダルカバー下のURL統合レイアウト */
+.db-modal-cover-url-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.db-modal-cover-url-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted, #9ca3af);
+  text-transform: uppercase;
+}
+
+.db-modal-cover-url-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ギャラリーヘッダーエリア */
+.db-gallery-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0 4px 8px 4px;
+}
+
+/* モーダル内のプロパティ非表示ボタン */
+.btn-hide-property-modal {
+  background: none;
+  border: none;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.db-modal-property-row:hover .btn-hide-property-modal {
+  opacity: 1;
+}
+
+.btn-hide-property-modal:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ef4444;
+}
+
+/* モーダルプロパティ入力ラッパーのレイアウト調整 */
+.db-modal-property-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+/* セレクトタグ削除用×ボタン */
+.db-select-badge .btn-remove-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-left: 4px;
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.db-select-badge .btn-remove-tag:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* 詳細モーダル内セレクトプロパティ用マルチバッジUI */
+.db-modal-select-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.btn-add-tag-modal {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed var(--border-light, rgba(255,255,255,0.15));
+  border-radius: 4px;
+  color: var(--text-muted, #9ca3af);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  height: 20px;
+}
+
+.btn-add-tag-modal:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--accent-primary, #8b5cf6);
+  border-color: var(--accent-primary, #8b5cf6);
+}
+
+
