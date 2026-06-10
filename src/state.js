@@ -30,7 +30,15 @@ export const state = {
   lastActiveEditTarget: null,
   lastSelectedBlockId: null,
   isComposing: false,
-  customTagColors: {}
+  customTagColors: {},
+
+  // スプリットペイン関連
+  isSplit: false,
+  activePaneIndex: 0,
+  panes: [
+    { activeNoteId: null, noteHistory: [], historyIndex: -1 },
+    { activeNoteId: null, noteHistory: [], historyIndex: -1 }
+  ]
 };
 
 export const historyState = {
@@ -387,17 +395,45 @@ export function initStorage() {
     }
   }
 
+  // Load Split Pane State
+  // 常にデフォルトは1画面（非分割）とする
+  state.isSplit = false;
+  state.activePaneIndex = 0;
+
   // Load Active Note Id
   const savedActiveId = localStorage.getItem('notidian_active_note_id');
+  let firstNoteId = null;
   if (savedActiveId && Array.isArray(state.notes) && state.notes.some(n => n.id === savedActiveId)) {
-    state.activeNoteId = savedActiveId;
+    firstNoteId = savedActiveId;
   } else if (Array.isArray(state.notes) && state.notes.length > 0) {
-    state.activeNoteId = state.notes[0].id;
+    firstNoteId = state.notes[0].id;
+  }
+  state.activeNoteId = firstNoteId;
+
+  // Initialize panes
+  state.panes = [
+    { activeNoteId: firstNoteId, noteHistory: firstNoteId ? [firstNoteId] : [], historyIndex: firstNoteId ? 0 : -1 },
+    { activeNoteId: null, noteHistory: [], historyIndex: -1 }
+  ];
+
+  // Restore right pane if saved
+  const savedRightActiveId = localStorage.getItem('notidian_right_active_note_id');
+  if (savedRightActiveId && Array.isArray(state.notes) && state.notes.some(n => n.id === savedRightActiveId)) {
+    state.panes[1].activeNoteId = savedRightActiveId;
+    state.panes[1].noteHistory = [savedRightActiveId];
+    state.panes[1].historyIndex = 0;
+  } else if (firstNoteId && state.isSplit) {
+    state.panes[1].activeNoteId = firstNoteId;
+    state.panes[1].noteHistory = [firstNoteId];
+    state.panes[1].historyIndex = 0;
   }
 
-  if (state.activeNoteId) {
-    state.noteHistory = [state.activeNoteId];
-    state.historyIndex = 0;
+  // Set the global activeNoteId to correspond to the active pane
+  const currentActivePane = state.panes[state.activePaneIndex];
+  if (currentActivePane && currentActivePane.activeNoteId) {
+    state.activeNoteId = currentActivePane.activeNoteId;
+    state.noteHistory = currentActivePane.noteHistory;
+    state.historyIndex = currentActivePane.historyIndex;
   }
 
   // Load Folders

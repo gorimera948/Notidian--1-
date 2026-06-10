@@ -52,135 +52,211 @@ if (typeof window !== 'undefined') {
 // 3. RECUSIVE EDITOR RENDERER
 // ==========================================
 
-const blockCanvas = document.getElementById('block-canvas');
+// 画面分割の切り替え
+export function toggleSplitView() {
+  state.isSplit = !state.isSplit;
+  localStorage.setItem('notidian_is_split', state.isSplit);
+
+  if (state.isSplit) {
+    // 分割時、現在アクティブなペインのノートを右ペインにコピーして開く
+    const activeId = state.panes[state.activePaneIndex].activeNoteId || state.activeNoteId;
+    if (activeId) {
+      state.panes[1].activeNoteId = activeId;
+      state.panes[1].noteHistory = [activeId];
+      state.panes[1].historyIndex = 0;
+      localStorage.setItem('notidian_right_active_note_id', activeId);
+    }
+  } else {
+    // 分割解除時、アクティブだったペインのノートを全体の activeNoteId にする
+    const activePane = state.panes[state.activePaneIndex];
+    if (activePane && activePane.activeNoteId) {
+      state.activeNoteId = activePane.activeNoteId;
+      state.noteHistory = activePane.noteHistory;
+      state.historyIndex = activePane.historyIndex;
+      localStorage.setItem('notidian_active_note_id', state.activeNoteId);
+    }
+  }
+
+  if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
+    window.Notidian.renderNoteList();
+  }
+  renderEditor();
+  
+  setTimeout(() => {
+    window.dispatchEvent(new Event('resize'));
+  }, 200);
+}
+
+function updateWikiLinksAcrossNotes(oldTitle, newTitle) {
+  const updateLinkTargets = (blocksArr) => {
+    blocksArr.forEach(b => {
+      if (b.content) {
+        b.content = b.content.replace(/\[\[(.*?)\]\]/g, (m, target) => {
+          if (target.trim().toLowerCase() === oldTitle.toLowerCase()) {
+            return `[[${newTitle}]]`;
+          }
+          return m;
+        }).replace(/「「(.*?)」」/g, (m, target) => {
+          if (target.trim().toLowerCase() === oldTitle.toLowerCase()) {
+            return `「「${newTitle}」」`;
+          }
+          return m;
+        });
+      }
+      if (b.children) updateLinkTargets(b.children);
+    });
+  };
+
+  state.notes.forEach(n => {
+    if (n.blocks) updateLinkTargets(n.blocks);
+  });
+}
 
 export function renderEditor() {
-  const note = getActiveNote();
-  if (!note) {
-    blockCanvas.innerHTML = '<div class="no-data-msg">ノートがありません。「＋」ボタンを押して新規作成してください。</div>';
-    document.getElementById('note-title-input').value = '';
-    document.getElementById('breadcrumb-note-title').textContent = 'ノートなし';
-    return;
+  const editorArea = document.querySelector('.editor-area');
+  if (!editorArea) return;
+
+  const paneCount = state.isSplit ? 2 : 1;
+  editorArea.classList.toggle('split-view', state.isSplit);
+
+  // ペインの数合わせ
+  let paneEls = Array.from(editorArea.querySelectorAll('.editor-pane'));
+  while (paneEls.length > paneCount) {
+    paneEls.pop().remove();
+  }
+  while (paneEls.length < paneCount) {
+    const paneIndex = paneEls.length;
+    const newPane = document.createElement('div');
+    newPane.className = `editor-pane ${paneIndex === state.activePaneIndex ? 'active-pane' : ''}`;
+    newPane.setAttribute('data-pane-index', paneIndex);
+
+    // ペインをアクティブにする処理
+    newPane.addEventListener('mousedown', () => {
+      if (state.activePaneIndex !== paneIndex) {
+        state.activePaneIndex = paneIndex;
+        localStorage.setItem('notidian_active_pane_index', paneIndex);
+
+        const paneState = state.panes[paneIndex];
+        if (paneState) {
+          state.activeNoteId = paneState.activeNoteId;
+          state.noteHistory = paneState.noteHistory || [];
+          state.historyIndex = paneState.historyIndex !== undefined ? paneState.historyIndex : -1;
+          localStorage.setItem('notidian_active_note_id', state.activeNoteId || '');
+        }
+
+        document.querySelectorAll('.editor-pane').forEach((el, idx) => {
+          el.classList.toggle('active-pane', idx === paneIndex);
+        });
+
+        if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
+          window.Notidian.renderNoteList();
+        }
+        if (window.Notidian && typeof window.Notidian.updateBacklinks === 'function') {
+          window.Notidian.updateBacklinks();
+        }
+      }
+    });
+
+    editorArea.appendChild(newPane);
+    paneEls.push(newPane);
   }
 
-  // Update title inputs
-  document.getElementById('note-title-input').value = note.title;
-  document.getElementById('breadcrumb-note-title').textContent = note.title;
+  // 元々あった editor-container を削除する（古いものが残らないように）
+  const oldContainer = editorArea.querySelector(':scope > .editor-container');
+  if (oldContainer) oldContainer.remove();
 
-  // お気に入り（星マーク）ボタンの動的生成と更新
-  const titleWrapper = document.querySelector('.note-title-wrapper');
-  if (titleWrapper) {
-    let favBtn = titleWrapper.querySelector('.btn-favorite-toggle');
-    if (!favBtn) {
-      favBtn = document.createElement('button');
-      favBtn.className = 'btn-favorite-toggle';
-      titleWrapper.appendChild(favBtn);
+  paneEls.forEach((paneEl, paneIndex) => {
+    paneEl.classList.toggle('active-pane', paneIndex === state.activePaneIndex);
+
+    const paneState = state.panes[paneIndex];
+    const noteId = paneState ? paneState.activeNoteId : null;
+    const note = state.notes.find(n => n.id === noteId);
+
+    paneEl.innerHTML = '';
+
+    if (!note) {
+      const emptyContainer = document.createElement('div');
+      emptyContainer.className = 'editor-container';
+      emptyContainer.style = 'display:flex; align-items:center; justify-content:center; height:100%;';
+      emptyContainer.innerHTML = `
+        <div class="no-data-msg">
+          ${paneIndex === 1 ? '右ペインが未選択です。サイドバーまたは左ペインからWikiリンク等をクリックして開くか、新規ノートを作成してください。' : 'ノートがありません。「＋」ボタンを押して新規作成してください。'}
+        </div>
+      `;
+      paneEl.appendChild(emptyContainer);
+      return;
     }
-    favBtn.className = `btn-favorite-toggle ${note.isFavorite ? 'active' : ''}`;
-    favBtn.innerHTML = `<i class="fa-${note.isFavorite ? 'solid' : 'regular'} fa-star"></i>`;
-    favBtn.title = note.isFavorite ? 'お気に入りから外す' : 'お気に入りに追加';
 
-    // 重複リスナーを避けるためクローン置換（モック環境等へのフォールバック対応）
-    const newFavBtn = favBtn.cloneNode ? favBtn.cloneNode(true) : favBtn;
-    if (newFavBtn !== favBtn) {
-      newFavBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        note.isFavorite = !note.isFavorite;
-        saveNotesToStorage();
+    const container = document.createElement('div');
+    container.className = 'editor-container';
+
+    // ツールバー
+    const toolbar = document.createElement('div');
+    toolbar.className = 'editor-toolbar';
+
+    const toolbarLeft = document.createElement('div');
+    toolbarLeft.className = 'toolbar-left';
+
+    const historyControls = document.createElement('div');
+    historyControls.className = 'history-controls';
+
+    const backBtn = document.createElement('button');
+    backBtn.className = 'btn-history';
+    backBtn.title = '戻る';
+    backBtn.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+    backBtn.disabled = (paneState.historyIndex <= 0);
+    backBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (paneState.historyIndex > 0) {
+        paneState.historyIndex--;
+        paneState.activeNoteId = paneState.noteHistory[paneState.historyIndex];
+        if (paneIndex === state.activePaneIndex) {
+          state.activeNoteId = paneState.activeNoteId;
+          state.noteHistory = paneState.noteHistory;
+          state.historyIndex = paneState.historyIndex;
+          localStorage.setItem('notidian_active_note_id', state.activeNoteId || '');
+        }
         renderEditor();
         if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
           window.Notidian.renderNoteList();
         }
-      });
-      titleWrapper.replaceChild(newFavBtn, favBtn);
-    } else {
-      favBtn.onclick = (e) => {
-        e.stopPropagation();
-        note.isFavorite = !note.isFavorite;
-        saveNotesToStorage();
+      }
+    });
+
+    const forwardBtn = document.createElement('button');
+    forwardBtn.className = 'btn-history';
+    forwardBtn.title = '進む';
+    forwardBtn.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+    forwardBtn.disabled = (paneState.historyIndex >= paneState.noteHistory.length - 1);
+    forwardBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (paneState.historyIndex < paneState.noteHistory.length - 1) {
+        paneState.historyIndex++;
+        paneState.activeNoteId = paneState.noteHistory[paneState.historyIndex];
+        if (paneIndex === state.activePaneIndex) {
+          state.activeNoteId = paneState.activeNoteId;
+          state.noteHistory = paneState.noteHistory;
+          state.historyIndex = paneState.historyIndex;
+          localStorage.setItem('notidian_active_note_id', state.activeNoteId || '');
+        }
         renderEditor();
         if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
           window.Notidian.renderNoteList();
         }
-      };
-    }
+      }
+    });
 
-    // ノート削除ボタンの動的生成と更新
-    let deleteBtn = titleWrapper.querySelector('.btn-note-delete');
-    if (!deleteBtn) {
-      deleteBtn = document.createElement('button');
-      deleteBtn.className = 'btn-note-delete';
-      deleteBtn.style = 'position: absolute; top: 42px; right: 74px; z-index: 10; background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: 6px; font-size: 18px; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s ease;';
-      deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
-      deleteBtn.title = '現在のノートを削除';
-      titleWrapper.appendChild(deleteBtn);
-    }
+    historyControls.appendChild(backBtn);
+    historyControls.appendChild(forwardBtn);
+    toolbarLeft.appendChild(historyControls);
 
-    deleteBtn.onmouseenter = () => {
-      deleteBtn.style.color = '#ef4444';
-      deleteBtn.style.background = 'rgba(239, 68, 68, 0.1)';
-    };
-    deleteBtn.onmouseleave = () => {
-      deleteBtn.style.color = 'var(--text-muted)';
-      deleteBtn.style.background = 'transparent';
-    };
+    const indicator = document.createElement('div');
+    indicator.className = 'active-note-indicator';
+    indicator.innerHTML = `<i class="fa-regular fa-file-lines"></i> <span class="breadcrumb-note-title">${escapeHTML(note.title)}</span>`;
+    toolbarLeft.appendChild(indicator);
+    toolbar.appendChild(toolbarLeft);
 
-    const newDeleteBtn = deleteBtn.cloneNode ? deleteBtn.cloneNode(true) : deleteBtn;
-    if (newDeleteBtn !== deleteBtn) {
-      newDeleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (window.Notidian && typeof window.Notidian.deleteNote === 'function') {
-          window.Notidian.deleteNote(note.id, e);
-        }
-      });
-      titleWrapper.replaceChild(newDeleteBtn, deleteBtn);
-    } else {
-      deleteBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (window.Notidian && typeof window.Notidian.deleteNote === 'function') {
-          window.Notidian.deleteNote(note.id, e);
-        }
-      };
-    }
-  }
-
-  // Clear canvas
-  blockCanvas.innerHTML = '';
-
-  // タグ表示のレンダリング
-  if (window.Notidian && typeof window.Notidian.renderNoteTags === 'function') {
-    window.Notidian.renderNoteTags();
-  }
-
-  // Render top-level blocks
-  if (note.blocks.length === 0) {
-    // Add default paragraph if empty
-    note.blocks.push({ id: generateId(), type: 'p', content: '' });
-  }
-
-  note.blocks.forEach(block => {
-    const blockEl = createBlockDOM(block, null);
-    blockCanvas.appendChild(blockEl);
-  });
-
-  // Setup drop indicator coordinates
-  setupDragDropListeners();
-  if (window.Notidian && typeof window.Notidian.updateBacklinks === 'function') {
-    window.Notidian.updateBacklinks();
-  }
-  if (window.Notidian && typeof window.Notidian.renderNoteLinksPanel === 'function') {
-    window.Notidian.renderNoteLinksPanel();
-  }
-  if (window.Notidian && typeof window.Notidian.updateTimerTargetTableSelect === 'function') {
-    window.Notidian.updateTimerTargetTableSelect();
-  }
-
-  // Update template overwrite button
-  const toolbarLeft = document.querySelector('.toolbar-left');
-  if (toolbarLeft) {
-    const oldBtn = toolbarLeft.querySelector('.btn-overwrite-template');
-    if (oldBtn) oldBtn.remove();
-
+    // テンプレート上書きボタン
     if (note.templateSourceId) {
       const template = state.notes.find(t => t.id === note.templateSourceId && t.isTemplate);
       if (template) {
@@ -196,18 +272,155 @@ export function renderEditor() {
         toolbarLeft.appendChild(overwriteBtn);
       }
     }
-  }
 
-  // 同期処理: 画面再描画後も一括操作バーの表示状態を最新にする
+    const toolbarRight = document.createElement('div');
+    toolbarRight.className = 'editor-actions';
+
+    const splitBtn = document.createElement('button');
+    splitBtn.className = 'btn-secondary';
+    splitBtn.style = 'display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;';
+    splitBtn.innerHTML = state.isSplit 
+      ? '<i class="fa-solid fa-square"></i> <span>分割解除</span>' 
+      : '<i class="fa-solid fa-table-columns"></i> <span>左右に分割</span>';
+    splitBtn.title = state.isSplit ? '画面分割を解除する' : '画面を左右に分割する';
+    splitBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSplitView();
+    });
+    toolbarRight.appendChild(splitBtn);
+    toolbar.appendChild(toolbarRight);
+
+    container.appendChild(toolbar);
+
+    // タイトル
+    const titleWrapper = document.createElement('div');
+    titleWrapper.className = 'note-title-wrapper';
+
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.className = 'note-title-input';
+    titleInput.placeholder = '無題';
+    titleInput.value = note.title;
+
+    let oldTitle = note.title;
+    titleInput.addEventListener('focus', () => {
+      oldTitle = note.title;
+    });
+
+    titleInput.addEventListener('blur', () => {
+      const newTitle = titleInput.value.trim();
+      if (newTitle === '') {
+        titleInput.value = note.title;
+        return;
+      }
+      if (newTitle !== oldTitle) {
+        updateWikiLinksAcrossNotes(oldTitle, newTitle);
+        note.title = newTitle;
+        note.updatedAt = Date.now();
+        saveNotesToStorage();
+        if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
+          window.Notidian.renderNoteList();
+        }
+        renderEditor();
+      }
+    });
+
+    titleInput.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') {
+        evt.preventDefault();
+        titleInput.blur();
+      }
+    });
+
+    titleWrapper.appendChild(titleInput);
+
+    const titleActions = document.createElement('div');
+    titleActions.className = 'note-title-actions';
+    titleActions.style = 'display: flex; align-items: center; gap: 8px; flex-shrink: 0;';
+
+    const favBtn = document.createElement('button');
+    favBtn.className = `btn-favorite-toggle ${note.isFavorite ? 'active' : ''}`;
+    favBtn.innerHTML = `<i class="fa-${note.isFavorite ? 'solid' : 'regular'} fa-star"></i>`;
+    favBtn.title = note.isFavorite ? 'お気に入りから外す' : 'お気に入りに追加';
+    favBtn.style.position = 'relative';
+    favBtn.style.top = 'auto';
+    favBtn.style.right = 'auto';
+    favBtn.style.zIndex = 'auto';
+    favBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      note.isFavorite = !note.isFavorite;
+      saveNotesToStorage();
+      renderEditor();
+      if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
+        window.Notidian.renderNoteList();
+      }
+    });
+    titleActions.appendChild(favBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn-note-delete';
+    deleteBtn.style = 'position: relative; top: auto; right: auto; z-index: auto; background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: 6px; font-size: 18px; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s ease;';
+    deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+    deleteBtn.title = '現在のノートを削除';
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (window.Notidian && typeof window.Notidian.deleteNote === 'function') {
+        window.Notidian.deleteNote(note.id, e);
+      }
+    });
+    titleActions.appendChild(deleteBtn);
+
+    titleWrapper.appendChild(titleActions);
+
+    container.appendChild(titleWrapper);
+
+    // タグ表示
+    const tagsPanel = document.createElement('div');
+    tagsPanel.className = 'note-tags-panel';
+    tagsPanel.style = 'display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 54px 16px 54px; padding: 0;';
+    container.appendChild(tagsPanel);
+    if (window.Notidian && typeof window.Notidian.renderNoteTags === 'function') {
+      window.Notidian.renderNoteTags(tagsPanel, note);
+    }
+
+    // リンク表示
+    const linksPanel = document.createElement('div');
+    linksPanel.className = 'note-links-panel';
+    container.appendChild(linksPanel);
+    if (window.Notidian && typeof window.Notidian.updateBacklinks === 'function') {
+      window.Notidian.updateBacklinks(linksPanel, note);
+    }
+
+    // キャンバス
+    const canvas = document.createElement('div');
+    canvas.className = 'block-canvas';
+
+    if (note.blocks.length === 0) {
+      note.blocks.push({ id: generateId(), type: 'p', content: '' });
+    }
+
+    note.blocks.forEach(block => {
+      const blockEl = createBlockDOM(block, null);
+      canvas.appendChild(blockEl);
+    });
+
+    container.appendChild(canvas);
+    paneEl.appendChild(container);
+  });
+
+  setupDragDropListeners();
   updateBlockBulkActionBar();
 
   if (window.tableSelection && window.tableSelection.blockId) {
-    const found = findBlockAndParent(note.blocks, window.tableSelection.blockId);
-    if (found && found.block) {
-      const rows = found.block.properties?.rows || [];
-      updateBulkActionBar(found.block, rows);
-    } else {
-      if (typeof window.clearTableSelection === 'function') window.clearTableSelection();
+    const activeNote = getActiveNote();
+    if (activeNote) {
+      const found = findBlockAndParent(activeNote.blocks, window.tableSelection.blockId);
+      if (found && found.block) {
+        const rows = found.block.properties?.rows || [];
+        updateBulkActionBar(found.block, rows);
+      } else {
+        if (typeof window.clearTableSelection === 'function') window.clearTableSelection();
+      }
     }
   } else {
     const bar = document.getElementById('db-bulk-action-bar');

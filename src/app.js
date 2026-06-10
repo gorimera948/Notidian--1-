@@ -73,7 +73,8 @@ import {
   setupDragSelection,
   initSlashMenuSortable,
   uncolumn,
-  showLinkEditPopover
+  showLinkEditPopover,
+  toggleSplitView
 } from './editor.js';
 
 import { MindMap } from './mindmap.js';
@@ -137,7 +138,8 @@ window.Notidian = {
   overwriteTemplateFromActiveDaily,
   renderNoteTags,
   renderAnalytics,
-  updateExistingTagsDatalist
+  updateExistingTagsDatalist,
+  toggleSplitView
 };
 
 // ==========================================
@@ -149,18 +151,28 @@ function navigateToNote(noteId, pushToHistory = true) {
   // Clear selections
   if (window.clearBlockSelection) window.clearBlockSelection();
 
-  if (pushToHistory) {
-    if (state.historyIndex < state.noteHistory.length - 1) {
-      state.noteHistory = state.noteHistory.slice(0, state.historyIndex + 1);
+  const paneState = state.panes[state.activePaneIndex];
+  if (paneState) {
+    if (pushToHistory) {
+      if (paneState.historyIndex < paneState.noteHistory.length - 1) {
+        paneState.noteHistory = paneState.noteHistory.slice(0, paneState.historyIndex + 1);
+      }
+      if (paneState.noteHistory[paneState.historyIndex] !== noteId) {
+        paneState.noteHistory.push(noteId);
+        paneState.historyIndex = paneState.noteHistory.length - 1;
+      }
     }
-    if (state.noteHistory[state.historyIndex] !== noteId) {
-      state.noteHistory.push(noteId);
-      state.historyIndex = state.noteHistory.length - 1;
-    }
+    paneState.activeNoteId = noteId;
+
+    state.activeNoteId = noteId;
+    state.noteHistory = paneState.noteHistory;
+    state.historyIndex = paneState.historyIndex;
   }
 
-  state.activeNoteId = noteId;
-  localStorage.setItem('notidian_active_note_id', noteId);
+  localStorage.setItem('notidian_active_note_id', state.panes[0].activeNoteId || '');
+  localStorage.setItem('notidian_right_active_note_id', state.panes[1].activeNoteId || '');
+  localStorage.setItem('notidian_active_pane_index', state.activePaneIndex);
+  localStorage.setItem('notidian_is_split', state.isSplit);
 
   renderNoteList();
   renderEditor();
@@ -319,16 +331,20 @@ if (noteTitleInput) {
 // ==========================================
 // BACKLINKS & OUTGOING LINKS
 // ==========================================
-export function updateBacklinks() {
+export function updateBacklinks(panel = null, activeNote = null) {
   // 1. 下部リンクパネルの更新
-  let panel = document.getElementById('backlinks-panel-content');
   if (!panel) {
-    panel = document.getElementById('note-links-panel');
+    panel = document.getElementById('backlinks-panel-content');
+    if (!panel) {
+      panel = document.getElementById('note-links-panel');
+    }
   }
   if (!panel) return;
   panel.innerHTML = '';
 
-  const activeNote = getActiveNote();
+  if (!activeNote) {
+    activeNote = getActiveNote();
+  }
   if (!activeNote) {
     panel.innerHTML = '<div class="no-links-msg">ノートが選択されていません。</div>';
     return;
@@ -1564,15 +1580,19 @@ export function updateExistingTagsDatalist() {
   });
 }
 
-export function renderNoteTags() {
-  const tagsPanel = document.getElementById('note-tags-panel');
+export function renderNoteTags(tagsPanel = null, note = null) {
+  if (!tagsPanel) {
+    tagsPanel = document.getElementById('note-tags-panel');
+  }
   if (!tagsPanel) return;
 
   // タグ補完用の datalist を最新化
   updateExistingTagsDatalist();
 
   tagsPanel.innerHTML = '';
-  const note = getActiveNote();
+  if (!note) {
+    note = getActiveNote();
+  }
   if (!note) return;
 
   // マイグレーション：tagsプロパティがない場合は初期化
@@ -1621,7 +1641,7 @@ export function renderNoteTags() {
       e.stopPropagation();
       note.tags.splice(idx, 1);
       saveNotesToStorage();
-      renderNoteTags();
+      renderNoteTags(tagsPanel, note);
       renderNoteList(); // サイドバーの更新
     });
 
@@ -1665,7 +1685,7 @@ export function renderNoteTags() {
     if (val && !note.tags.includes(val)) {
       note.tags.push(val);
       saveNotesToStorage();
-      renderNoteTags();
+      renderNoteTags(tagsPanel, note);
       renderNoteList(); // サイドバーの更新
     }
     addInput.value = '';
@@ -2663,6 +2683,68 @@ function initApp() {
   window.loadPreset = loadPreset;
   window.deletePreset = deletePreset;
   window.changeTargetTable = changeTargetTable;
+
+  // --- サイドバー折りたたみ機能の初期化 ---
+  const leftSidebar = document.querySelector('.sidebar-left');
+  const rightSidebar = document.querySelector('.sidebar-right');
+  const leftToggle = document.getElementById('sidebar-left-toggle');
+  const rightToggle = document.getElementById('sidebar-right-toggle');
+  const appContainer = document.querySelector('.app-container');
+
+  // 保存されている状態の復元
+  const isLeftCollapsed = localStorage.getItem('notidian_left_sidebar_collapsed') === 'true';
+  const isRightCollapsed = localStorage.getItem('notidian_right_sidebar_collapsed') === 'true';
+
+  if (isLeftCollapsed && leftSidebar && appContainer) {
+    leftSidebar.classList.add('collapsed');
+    appContainer.classList.add('left-collapsed');
+    if (leftToggle) {
+      leftToggle.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+      leftToggle.title = 'サイドバーを開く';
+    }
+  }
+
+  if (isRightCollapsed && rightSidebar && appContainer) {
+    rightSidebar.classList.add('collapsed');
+    appContainer.classList.add('right-collapsed');
+    if (rightToggle) {
+      rightToggle.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+      rightToggle.title = 'サイドバーを開く';
+    }
+  }
+
+  if (leftToggle && leftSidebar && appContainer) {
+    leftToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const collapsed = leftSidebar.classList.toggle('collapsed');
+      appContainer.classList.toggle('left-collapsed', collapsed);
+      localStorage.setItem('notidian_left_sidebar_collapsed', collapsed);
+      
+      leftToggle.innerHTML = collapsed 
+        ? '<i class="fa-solid fa-chevron-right"></i>' 
+        : '<i class="fa-solid fa-chevron-left"></i>';
+      leftToggle.title = collapsed ? 'サイドバーを開く' : 'サイドバーを閉じる';
+    });
+  }
+
+  if (rightToggle && rightSidebar && appContainer) {
+    rightToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const collapsed = rightSidebar.classList.toggle('collapsed');
+      appContainer.classList.toggle('right-collapsed', collapsed);
+      localStorage.setItem('notidian_right_sidebar_collapsed', collapsed);
+
+      rightToggle.innerHTML = collapsed 
+        ? '<i class="fa-solid fa-chevron-left"></i>' 
+        : '<i class="fa-solid fa-chevron-right"></i>';
+      rightToggle.title = collapsed ? 'サイドバーを開く' : 'サイドバーを閉じる';
+      
+      // マインドマップ等のリサイズイベントを発火してCanvasサイズを追従させる
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, 300);
+    });
+  }
 }
 
 // Race Condition 対策を施した確実な初期化実行

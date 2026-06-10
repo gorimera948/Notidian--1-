@@ -7622,22 +7622,8 @@ function renderGalleryViewDOM(block, rowDataList) {
         // ドラッグ調整用オーバーレイとコントロール
         const dragOverlay = document.createElement('div');
         dragOverlay.className = 'reposition-drag-overlay';
-        dragOverlay.textContent = 'ドラッグして位置調整';
+        dragOverlay.textContent = 'ドラッグして移動 / ホイールでズーム';
         coverArea.appendChild(dragOverlay);
-
-        // スライダーの追加
-        const sliderContainer = document.createElement('div');
-        sliderContainer.className = 'reposition-scale-slider-container';
-        sliderContainer.innerHTML = '<i class="fa-solid fa-magnifying-glass-plus"></i>';
-        
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.className = 'reposition-scale-slider';
-        slider.min = '100';
-        slider.max = '300';
-        slider.value = currentScale;
-        sliderContainer.appendChild(slider);
-        coverArea.appendChild(sliderContainer);
 
         const controls = document.createElement('div');
         controls.className = 'reposition-controls';
@@ -7659,17 +7645,35 @@ function renderGalleryViewDOM(block, rowDataList) {
         let tempPosX = currentPosX;
         let tempPosY = currentPosY;
         let tempScale = currentScale;
+        let dragStartPosX = currentPosX;
+        let dragStartPosY = currentPosY;
 
-        slider.addEventListener('input', () => {
-          tempScale = parseInt(slider.value, 10);
+        // クロップ枠（マスク）を意識した視覚的ハイライトを追加
+        coverArea.style.boxShadow = 'inset 0 0 0 2px var(--accent-primary, #8b5cf6)';
+        coverArea.style.borderRadius = '8px';
+
+        // マウスホイールによるスクロールズーム
+        const onWheel = (wheelEvt) => {
+          wheelEvt.preventDefault();
+          wheelEvt.stopPropagation();
+          const zoomStep = 5;
+          if (wheelEvt.deltaY < 0) {
+            tempScale = Math.min(400, tempScale + zoomStep); // 最大400%
+          } else {
+            tempScale = Math.max(100, tempScale - zoomStep); // 最小100%
+          }
           img.style.transform = `scale(${tempScale / 100})`;
-        });
+        };
+        coverArea.addEventListener('wheel', onWheel, { passive: false });
 
         const onMouseDown = (evt) => {
           evt.preventDefault();
           evt.stopPropagation();
           startX = evt.clientX;
           startY = evt.clientY;
+          // ドラッグ開始時点の座標を保持
+          dragStartPosX = tempPosX;
+          dragStartPosY = tempPosY;
           document.addEventListener('mousemove', onMouseMove);
           document.addEventListener('mouseup', onMouseUp);
         };
@@ -7680,10 +7684,15 @@ function renderGalleryViewDOM(block, rowDataList) {
           const rect = coverArea.getBoundingClientRect();
           const coverWidth = rect.width || 240;
           const coverHeight = rect.height || 140;
-          let offsetPercentX = (deltaX / coverWidth) * 100;
-          let offsetPercentY = (deltaY / coverHeight) * 100;
-          tempPosX = Math.max(0, Math.min(100, currentPosX - offsetPercentX));
-          tempPosY = Math.max(0, Math.min(100, currentPosY - offsetPercentY));
+          
+          // 拡大率に応じて感度を調整（拡大するほど移動しやすくする）
+          const sensitivity = tempScale > 100 ? (100 / tempScale) : 1;
+          
+          let offsetPercentX = (deltaX / coverWidth) * 100 * sensitivity;
+          let offsetPercentY = (deltaY / coverHeight) * 100 * sensitivity;
+          
+          tempPosX = Math.max(0, Math.min(100, dragStartPosX - offsetPercentX));
+          tempPosY = Math.max(0, Math.min(100, dragStartPosY - offsetPercentY));
           img.style.objectPosition = `${tempPosX}% ${tempPosY}%`;
         };
 
@@ -7717,11 +7726,12 @@ function renderGalleryViewDOM(block, rowDataList) {
 
         function cleanupReposition() {
           coverArea.style.cursor = '';
+          coverArea.style.boxShadow = '';
           coverArea.removeEventListener('mousedown', onMouseDown);
+          coverArea.removeEventListener('wheel', onWheel);
           document.removeEventListener('mousemove', onMouseMove);
           document.removeEventListener('mouseup', onMouseUp);
           dragOverlay.remove();
-          sliderContainer.remove();
           controls.remove();
           repBtn.style.display = '';
           setTimeout(() => {
@@ -8184,20 +8194,6 @@ function showDbRowEditModal(block, row, rowIndex) {
         dragOverlay.textContent = 'ドラッグして位置調整';
         previewWrapper.appendChild(dragOverlay);
 
-        // スライダーの追加
-        const sliderContainer = document.createElement('div');
-        sliderContainer.className = 'reposition-scale-slider-container';
-        sliderContainer.innerHTML = '<i class="fa-solid fa-magnifying-glass-plus"></i>';
-        
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.className = 'reposition-scale-slider';
-        slider.min = '100';
-        slider.max = '300';
-        slider.value = currentScale;
-        sliderContainer.appendChild(slider);
-        previewWrapper.appendChild(sliderContainer);
-
         // ボタンコントロール
         const controls = document.createElement('div');
         controls.className = 'reposition-controls';
@@ -8219,17 +8215,35 @@ function showDbRowEditModal(block, row, rowIndex) {
         let tempPosX = currentPosX;
         let tempPosY = currentPosY;
         let tempScale = currentScale;
+        let dragStartPosX = currentPosX;
+        let dragStartPosY = currentPosY;
 
-        slider.addEventListener('input', () => {
-          tempScale = parseInt(slider.value, 10);
+        // クロップ枠（マスク）を意識した視覚的ハイライトを追加
+        previewWrapper.style.boxShadow = 'inset 0 0 0 2px var(--accent-primary, #8b5cf6)';
+        previewWrapper.style.borderRadius = '8px';
+
+        // マウスホイールによるスクロールズーム
+        const onWheel = (wheelEvt) => {
+          wheelEvt.preventDefault();
+          wheelEvt.stopPropagation();
+          const zoomStep = 5;
+          if (wheelEvt.deltaY < 0) {
+            tempScale = Math.min(400, tempScale + zoomStep); // 最大400%
+          } else {
+            tempScale = Math.max(100, tempScale - zoomStep); // 最小100%
+          }
           img.style.transform = `scale(${tempScale / 100})`;
-        });
+        };
+        previewWrapper.addEventListener('wheel', onWheel, { passive: false });
 
         const onMouseDown = (evt) => {
           evt.preventDefault();
           evt.stopPropagation();
           startX = evt.clientX;
           startY = evt.clientY;
+          // ドラッグ開始時点の座標を保持
+          dragStartPosX = tempPosX;
+          dragStartPosY = tempPosY;
           document.addEventListener('mousemove', onMouseMove);
           document.addEventListener('mouseup', onMouseUp);
         };
@@ -8240,10 +8254,15 @@ function showDbRowEditModal(block, row, rowIndex) {
           const rect = previewWrapper.getBoundingClientRect();
           const coverWidth = rect.width || 240;
           const coverHeight = rect.height || 120;
-          let offsetPercentX = (deltaX / coverWidth) * 100;
-          let offsetPercentY = (deltaY / coverHeight) * 100;
-          tempPosX = Math.max(0, Math.min(100, currentPosX - offsetPercentX));
-          tempPosY = Math.max(0, Math.min(100, currentPosY - offsetPercentY));
+          
+          // 拡大率に応じて感度を調整（拡大するほど移動しやすくする）
+          const sensitivity = tempScale > 100 ? (100 / tempScale) : 1;
+          
+          let offsetPercentX = (deltaX / coverWidth) * 100 * sensitivity;
+          let offsetPercentY = (deltaY / coverHeight) * 100 * sensitivity;
+          
+          tempPosX = Math.max(0, Math.min(100, dragStartPosX - offsetPercentX));
+          tempPosY = Math.max(0, Math.min(100, dragStartPosY - offsetPercentY));
           img.style.objectPosition = `${tempPosX}% ${tempPosY}%`;
         };
 
@@ -8277,11 +8296,12 @@ function showDbRowEditModal(block, row, rowIndex) {
 
         function cleanupReposition() {
           previewWrapper.style.cursor = '';
+          previewWrapper.style.boxShadow = '';
           previewWrapper.removeEventListener('mousedown', onMouseDown);
+          previewWrapper.removeEventListener('wheel', onWheel);
           document.removeEventListener('mousemove', onMouseMove);
           document.removeEventListener('mouseup', onMouseUp);
           dragOverlay.remove();
-          sliderContainer.remove();
           controls.remove();
           repBtn.style.display = '';
         }
@@ -8525,46 +8545,31 @@ function showDbRowEditModal(block, row, rowIndex) {
         wrapper.style.alignItems = 'center';
         wrapper.style.minHeight = '32px';
 
-        const tags = String(currentVal || '').split(',').map(t => t.trim()).filter(Boolean);
-        if (tags.length === 0) {
-          const noTagBadge = document.createElement('span');
-          noTagBadge.className = 'db-select-badge db-tag-gray';
-          noTagBadge.style.opacity = '0.5';
-          noTagBadge.style.fontStyle = 'italic';
-          noTagBadge.textContent = '選択なし';
-          wrapper.appendChild(noTagBadge);
-        } else {
-          tags.forEach(tagVal => {
-            const badge = document.createElement('span');
-            badge.className = `db-select-badge db-tag-${getTagColor(col, tagVal)}`;
-            badge.textContent = tagVal;
-            
-            const removeBtn = document.createElement('span');
-            removeBtn.className = 'btn-remove-tag';
-            removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
-            removeBtn.addEventListener('click', (e) => {
-              e.stopPropagation();
-              pushHistory();
-              const newTags = tags.filter(t => t !== tagVal);
-              row[col.id] = newTags.join(', ');
-              saveNotesToStorage();
-              renderEditor();
-              renderModalProperties();
-            });
-            badge.appendChild(removeBtn);
-            wrapper.appendChild(badge);
-          });
-        }
+        const badgesContainer = document.createElement('div');
+        badgesContainer.className = 'db-modal-select-badges-container';
+        badgesContainer.style.display = 'flex';
+        badgesContainer.style.flexWrap = 'wrap';
+        badgesContainer.style.gap = '6px';
+        badgesContainer.style.alignItems = 'center';
+        wrapper.appendChild(badgesContainer);
 
         const addTagBtn = document.createElement('button');
         addTagBtn.className = 'btn-add-tag-modal';
         addTagBtn.innerHTML = '<i class="fa-solid fa-plus"></i> タグを追加';
+        
+        // 部分更新コールバック
+        const onUpdateCallback = () => {
+          // 他に必要なUI更新があればここに記述可能
+        };
+
         addTagBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          showSelectTagPopover(e, block, rowIndex, col.id, col.options || []);
+          showSelectTagInline(e, wrapper, block, rowIndex, col.id, col.options || [], badgesContainer, onUpdateCallback);
         });
-        wrapper.appendChild(addTagBtn);
 
+        renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdateCallback);
+
+        wrapper.appendChild(addTagBtn);
         inputWrapper.appendChild(wrapper);
       } else if (col.type === 'date') {
         const input = document.createElement('input');
@@ -8817,4 +8822,275 @@ function showDbRowEditModal(block, row, rowIndex) {
   });
 
   document.body.appendChild(overlay);
+}
+
+function renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdate) {
+  badgesContainer.innerHTML = '';
+  const currentVal = row[col.id] || '';
+  const tags = String(currentVal || '').split(',').map(t => t.trim()).filter(Boolean);
+  if (tags.length === 0) {
+    const noTagBadge = document.createElement('span');
+    noTagBadge.className = 'db-select-badge db-tag-gray';
+    noTagBadge.style.opacity = '0.5';
+    noTagBadge.style.fontStyle = 'italic';
+    noTagBadge.textContent = '選択なし';
+    badgesContainer.appendChild(noTagBadge);
+  } else {
+    tags.forEach(tagVal => {
+      const badge = document.createElement('span');
+      badge.className = `db-select-badge db-tag-${getTagColor(col, tagVal)}`;
+      badge.textContent = tagVal;
+      
+      const removeBtn = document.createElement('span');
+      removeBtn.className = 'btn-remove-tag';
+      removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pushHistory();
+        const newTags = tags.filter(t => t !== tagVal);
+        row[col.id] = newTags.join(', ');
+        saveNotesToStorage();
+        renderEditor();
+        // 部分更新
+        renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdate);
+        if (onUpdate) onUpdate();
+      });
+      badge.appendChild(removeBtn);
+      badgesContainer.appendChild(badge);
+    });
+  }
+}
+
+function showSelectTagInline(e, parentWrapper, block, rowIndex, colId, options, badgesContainer, onUpdate) {
+  // すでに同じ親内にインラインポップオーバーがあれば閉じる
+  const existing = parentWrapper.querySelector('.db-modal-select-inline-popover');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  // 他のインラインポップオーバーが開いていれば一括で閉じる
+  document.querySelectorAll('.db-modal-select-inline-popover').forEach(p => p.remove());
+
+  const popover = document.createElement('div');
+  popover.className = 'db-modal-select-inline-popover';
+
+  const col = block.properties.columns.find(c => c.id === colId);
+
+  const searchWrapper = document.createElement('div');
+  searchWrapper.style = 'padding: 6px; display: flex; flex-direction: column; gap: 4px;';
+  
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.className = 'db-popover-input';
+  searchInput.placeholder = 'タグを検索または新規作成...';
+  searchInput.style.width = '100%';
+  searchWrapper.appendChild(searchInput);
+  popover.appendChild(searchWrapper);
+
+  const optionsList = document.createElement('div');
+  optionsList.style = 'max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 0 4px;';
+  popover.appendChild(optionsList);
+
+  const renderList = () => {
+    const row = block.properties.rows[rowIndex];
+    const currentVal = row[colId] || '';
+    const tags = String(currentVal || '').split(',').map(t => t.trim()).filter(Boolean);
+    
+    // オプションを整理
+    let tagOptions = [];
+    if (col) {
+      if (!col.options) col.options = [];
+      const seen = new Set();
+      const uniqueOptions = [];
+      col.options.forEach(opt => {
+        let optObj = opt;
+        if (typeof opt === 'string') {
+          optObj = { id: opt, name: opt, color: getTagHashColor(opt) };
+        }
+        const normName = (optObj.name || '').trim().toLowerCase();
+        if (normName && !seen.has(normName)) {
+          seen.add(normName);
+          uniqueOptions.push(optObj);
+        }
+      });
+      col.options = uniqueOptions;
+      tagOptions = col.options;
+    }
+
+    optionsList.innerHTML = '';
+    const query = searchInput.value.toLowerCase().trim();
+
+    // 1. 「すべてクリア」
+    const noneItem = document.createElement('div');
+    noneItem.className = `db-popover-item ${!currentVal ? 'active' : ''}`;
+    noneItem.innerHTML = `<span class="db-select-badge db-tag-gray" style="opacity:0.6; font-style:italic;">すべてクリア</span>`;
+    noneItem.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      pushHistory();
+      row[colId] = '';
+      saveNotesToStorage();
+      renderEditor();
+      
+      renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdate);
+      renderList();
+    });
+    optionsList.appendChild(noneItem);
+
+    // フィルタリングされたオプション
+    const filtered = tagOptions.filter(opt => opt.name.toLowerCase().includes(query));
+
+    filtered.forEach(opt => {
+      const isAct = tags.includes(opt.name);
+      const item = document.createElement('div');
+      item.className = `db-popover-item ${isAct ? 'active' : ''}`;
+      item.style.display = 'flex';
+      item.style.alignItems = 'center';
+      item.style.justifyContent = 'space-between';
+      item.style.width = '100%';
+      item.style.boxSizing = 'border-box';
+      item.style.gap = '8px';
+
+      // 左側：チェックボックスとタグバッジ
+      const leftPart = document.createElement('div');
+      leftPart.style.display = 'flex';
+      leftPart.style.alignItems = 'center';
+      leftPart.style.gap = '6px';
+      leftPart.style.cursor = 'pointer';
+      leftPart.style.flexGrow = '1';
+
+      const checkIcon = isAct 
+        ? '<i class="fa-solid fa-check" style="font-size: 10px; color: var(--accent-primary, #8b5cf6);"></i>' 
+        : '<i class="fa-regular fa-square" style="font-size: 10px; opacity: 0.3;"></i>';
+      leftPart.innerHTML = `${checkIcon}<span class="db-select-badge db-tag-${opt.color || 'gray'}">${escapeHTML(opt.name)}</span>`;
+      
+      leftPart.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        pushHistory();
+        let newTags;
+        if (isAct) {
+          newTags = tags.filter(t => t !== opt.name);
+        } else {
+          newTags = [...tags, opt.name];
+        }
+        row[colId] = newTags.join(', ');
+        saveNotesToStorage();
+        renderEditor();
+        
+        renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdate);
+        renderList();
+      });
+      item.appendChild(leftPart);
+
+      // 右側：管理コントロール（色、削除）
+      const rightPart = document.createElement('div');
+      rightPart.style.display = 'flex';
+      rightPart.style.alignItems = 'center';
+      rightPart.style.gap = '8px';
+      rightPart.style.flexShrink = '0';
+
+      // 色変更
+      const colorDot = document.createElement('span');
+      colorDot.style = `display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent-${opt.color || 'gray'}, #9ca3af); cursor:pointer; border: 1px solid rgba(255,255,255,0.2);`;
+      colorDot.title = '色を変更';
+      colorDot.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        showColorPalettePopover(evt, (selectedColor) => {
+          opt.color = selectedColor;
+          saveNotesToStorage();
+          renderEditor();
+          renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdate);
+          renderList();
+        });
+      });
+      rightPart.appendChild(colorDot);
+
+      // 削除
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-status-ctrl';
+      delBtn.style.color = 'var(--text-muted, #9ca3af)';
+      delBtn.style.background = 'none';
+      delBtn.style.border = 'none';
+      delBtn.style.cursor = 'pointer';
+      delBtn.style.padding = '2px';
+      delBtn.style.display = 'inline-flex';
+      delBtn.style.alignItems = 'center';
+      delBtn.innerHTML = '<i class="fa-solid fa-trash-can" style="font-size: 10px;"></i>';
+      delBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        if (confirm(`タグ「${opt.name}」を削除しますか？\n(すべての行の選択からもこのタグが削除されます)`)) {
+          col.options = tagOptions.filter(o => o.id !== opt.id && o.name !== opt.name);
+          block.properties.rows.forEach(r => {
+            const rowVal = r[colId] || '';
+            const currentRowTags = String(rowVal).split(',').map(t => t.trim()).filter(Boolean);
+            const newRowTags = currentRowTags.filter(t => t !== opt.name);
+            r[colId] = newRowTags.join(', ');
+          });
+          saveNotesToStorage();
+          renderEditor();
+          renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdate);
+          renderList();
+        }
+      });
+      rightPart.appendChild(delBtn);
+
+      item.appendChild(rightPart);
+      optionsList.appendChild(item);
+    });
+
+    // 新規作成
+    if (query && !tagOptions.some(opt => opt.name.toLowerCase() === query)) {
+      const createItem = document.createElement('div');
+      createItem.className = 'db-popover-item';
+      createItem.style.color = 'var(--accent-primary, #8b5cf6)';
+      createItem.style.fontSize = '12px';
+      createItem.style.fontWeight = '500';
+      createItem.innerHTML = `<i class="fa-solid fa-plus" style="margin-right: 4px;"></i> 「${escapeHTML(query)}」を新規作成`;
+      createItem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const colors = ['blue', 'green', 'yellow', 'orange', 'red', 'purple', 'pink', 'gray'];
+        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+        const newOpt = { id: query, name: query, color: randomColor };
+        if (!col.options) col.options = [];
+        col.options.push(newOpt);
+        
+        pushHistory();
+        let newTags = [...tags, query];
+        row[colId] = newTags.join(', ');
+        saveNotesToStorage();
+        renderEditor();
+
+        searchInput.value = '';
+        renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onUpdate);
+        renderList();
+      });
+      optionsList.appendChild(createItem);
+    }
+
+    if (filtered.length === 0 && !query) {
+      const empty = document.createElement('div');
+      empty.style = 'padding: 8px; color: var(--text-muted); font-size: 12px; text-align: center;';
+      empty.innerText = '選択肢がありません。';
+      optionsList.appendChild(empty);
+    }
+  };
+
+  searchInput.addEventListener('input', renderList);
+  renderList();
+
+  parentWrapper.appendChild(popover);
+
+  setTimeout(() => {
+    searchInput.focus();
+  }, 50);
+
+  const closeInlinePopover = (evt) => {
+    if (!popover.contains(evt.target) && !parentWrapper.contains(evt.target)) {
+      popover.remove();
+      document.removeEventListener('click', closeInlinePopover);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', closeInlinePopover);
+  }, 10);
 }
