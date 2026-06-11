@@ -17,6 +17,10 @@ function updateBacklinks() {
 
 export function focusBlock(el) {
   if (!el) return;
+  // 非表示要素（データベース、画像、区切り線等のプレースホルダー）はフォーカス不可のためスキップ
+  if (el.style.display === 'none' || window.getComputedStyle(el).display === 'none') {
+    return;
+  }
   const allEditable = document.querySelectorAll('.block-content[contenteditable="true"]');
   allEditable.forEach(activeEl => {
     if (activeEl !== el) {
@@ -2060,25 +2064,30 @@ function handleSlashCommandTrigger(contentDiv, e) {
   }
 }
 
-function renderSlashMenuList() {
+function renderSlashMenuList(shouldScroll = true) {
   const items = slashMenuList.querySelectorAll('li');
   items.forEach((li, idx) => {
     if (idx === state.slashMenuActiveIndex) {
       li.classList.add('active');
-      li.scrollIntoView({ block: 'nearest' });
+      if (shouldScroll) {
+        li.scrollIntoView({ block: 'nearest' });
+      }
     } else {
       li.classList.remove('active');
     }
 
-    // Click trigger (ドラッグハンドルやブロックアイコン操作時は決定をスルーして並び替え可能にする)
-    li.onmousedown = (e) => {
-      if (e.target.closest('.drag-handle') || e.target.tagName.toLowerCase() === 'i') {
+    // Click trigger (ドラッグハンドル操作時は決定をスルーして並び替え可能にする)
+    const handleTrigger = (e) => {
+      if (e.target.closest('.drag-handle')) {
         return; // 並び替えドラッグを優先するため決定処理を実行しない
       }
       e.preventDefault();
       state.slashMenuActiveIndex = idx;
       selectSlashMenuItem();
     };
+
+    li.onmousedown = handleTrigger;
+    li.onclick = handleTrigger;
   });
 }
 
@@ -2173,6 +2182,10 @@ function selectSlashMenuItem() {
 
   // Focus back and place cursor at end
   setTimeout(() => {
+    // データベース、画像、区切り線の場合は非表示DOMとなりフォーカスできないため、処理をスキップ（ブラウザフリーズ防止）
+    if (newType === 'database' || newType === 'image' || newType === 'divider') {
+      return;
+    }
     const el = document.querySelector(`.block-content[data-id="${found.block.id}"]`);
     if (el) {
       focusBlock(el);
@@ -2845,20 +2858,39 @@ export function initSlashMenuSortable() {
   // 保存されている順序を適用
   applySlashMenuOrder();
 
-  // SortableJSの適用
-  new Sortable(list, {
-    animation: 150,
+  // SortableJSの適用 (Sortable.create に統一し、ドラッグ時のフォーカス干渉を防ぐガード処理を追加)
+  Sortable.create(list, {
+    animation: 0, // アニメーション中のDOM競合やトランジションバグを防ぐため0にする
     handle: '.drag-handle',
     ghostClass: 'sortable-ghost',
+    onStart: function () {
+      // ドラッグ開始時に、エディタの選択範囲を一時クリアして contenteditable との干渉によるフリーズを防止
+      window.getSelection().removeAllRanges();
+    },
     onEnd: function () {
-      const items = Array.from(list.querySelectorAll('li'));
-      const order = items.map(li => li.getAttribute('data-type'));
-      localStorage.setItem('notidian_slash_menu_order', JSON.stringify(order));
+      try {
+        const items = Array.from(list.querySelectorAll('li'));
+        const order = items.map(li => li.getAttribute('data-type'));
+        localStorage.setItem('notidian_slash_menu_order', JSON.stringify(order));
 
-      // 並べ替え後にアクティブインデックスがズレるのを修正
-      const activeIdx = items.findIndex(li => li.classList.contains('active'));
-      if (activeIdx !== -1) {
-        state.slashMenuActiveIndex = activeIdx;
+        // 並べ替え後にアクティブインデックスがズレるのを修正
+        const activeIdx = items.findIndex(li => li.classList.contains('active'));
+        if (activeIdx !== -1) {
+          state.slashMenuActiveIndex = activeIdx;
+        }
+
+        // SortableJS の内部クリーンアップ完了後に安全に同期するため、遅延実行する
+        setTimeout(() => {
+          try {
+            // ドロップ完了後の十分な遅延の後に選択範囲をクリアしてブラウザのイベント無限ループを防止
+            window.getSelection().removeAllRanges();
+            renderSlashMenuList(false); // ドラッグ終了後のため、スクロールは行わない
+          } catch (err) {
+            console.error("Error in post-drag slash menu render:", err);
+          }
+        }, 100); // 遅延を十分に（100ms）確保してSortableJSのクリーンアップ完了を待つ
+      } catch (e) {
+        console.error("Error in slash menu drag end:", e);
       }
     }
   });

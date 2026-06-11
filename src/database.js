@@ -1283,6 +1283,11 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     tr.className = 'db-data-row';
 
     tr.addEventListener('click', (e) => {
+      // 直前の編集確定処理などでクリックされた要素が DOM から取り除かれている（孤立している）場合、
+      // 編集アクションの余波とみなして行選択のトリガーを防止する
+      if (!document.body.contains(e.target)) {
+        return;
+      }
       // 編集可能要素などをクリックして編集に入る際、選択状態があればリセットする
       const isEditTarget = e.target.closest('.db-cell-edit, input, button, select, .db-select-badge, .db-date-span');
       if (isEditTarget) {
@@ -1683,6 +1688,10 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
               }
             }
 
+            if (evt.shiftKey) {
+              // Shift+Enter の場合は改行を許可するため確定（blur）させない
+              return;
+            }
             evt.preventDefault();
             cellDiv.blur();
           }
@@ -5686,6 +5695,25 @@ function showCalendarOptionsPopover(e, block, view) {
   // タイトル以外の列を「追加可能なプロパティ」としてすべてテーブルと100%連動して抽出
   const addableCols = columns.filter(c => c.id !== 'col-title');
 
+  const dateCol = columns.find(c => c.type === 'date');
+  let dateModeHtml = '';
+  if (dateCol) {
+    dateCol.dateDisplayMode = dateCol.dateDisplayMode || 'date';
+    dateModeHtml = `
+      <div class="db-popover-divider" style="margin:4px 0;"></div>
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <span style="font-size:10px; color:var(--text-primary); font-weight:600; display:flex; align-items:center; gap:4px;">
+          <i class="fa-regular fa-calendar" style="font-size:9px; color:var(--accent-primary);"></i> 日付表示モード
+        </span>
+        <select id="cal-date-mode-select" class="db-filter-val-select" style="width:100%; font-size:10px; padding:2px; background: rgba(0,0,0,0.4); border: 1px solid var(--border-light); color: var(--text-primary); border-radius: 4px;">
+          <option value="date" ${dateCol.dateDisplayMode === 'date' ? 'selected' : ''}>通常日付 (標準)</option>
+          <option value="duration-days" ${dateCol.dateDisplayMode === 'duration-days' ? 'selected' : ''}>経過日数 (〇〇日間)</option>
+          <option value="remaining-days" ${dateCol.dateDisplayMode === 'remaining-days' ? 'selected' : ''}>残り日数/期限</option>
+        </select>
+      </div>
+    `;
+  }
+
   popover.innerHTML = `
     <div style="font-size:10px; color:var(--text-muted); font-weight:700; padding:4px 6px; border-bottom:1px solid var(--border-light);">カレンダー表示オプション</div>
     <div style="padding:8px; display:flex; flex-direction:column; gap:8px; max-height: 280px; overflow-y: auto;">
@@ -5702,20 +5730,22 @@ function showCalendarOptionsPopover(e, block, view) {
         <input type="checkbox" id="cal-show-time" style="cursor:pointer;" ${view.calShowTime ? 'checked' : ''}>
       </div>
 
+      ${dateModeHtml}
+
       <div class="db-popover-divider" style="margin:4px 0;"></div>
       <div style="font-size:9px; color:var(--text-muted); font-weight:700; margin-bottom:2px;">プロパティを追加</div>
 
       <div id="cal-properties-list" style="display:flex; flex-direction:column; gap:6px;">
         ${addableCols.map(c => {
-    const isChecked = view.calColIds.includes(c.id);
-    let typeIcon = 'fa-regular fa-file-lines';
-    if (c.type === 'number') typeIcon = 'fa-solid fa-hashtag';
-    if (c.type === 'select') typeIcon = 'fa-solid fa-list-ul';
-    if (c.type === 'status') typeIcon = 'fa-solid fa-circle-check';
-    if (c.type === 'checkbox') typeIcon = 'fa-regular fa-square-check';
-    if (c.type === 'date') typeIcon = 'fa-regular fa-calendar';
+          const isChecked = view.calColIds.includes(c.id);
+          let typeIcon = 'fa-regular fa-file-lines';
+          if (c.type === 'number') typeIcon = 'fa-solid fa-hashtag';
+          if (c.type === 'select') typeIcon = 'fa-solid fa-list-ul';
+          if (c.type === 'status') typeIcon = 'fa-solid fa-circle-check';
+          if (c.type === 'checkbox') typeIcon = 'fa-regular fa-square-check';
+          if (c.type === 'date') typeIcon = 'fa-regular fa-calendar';
 
-    return `
+          return `
             <div style="display:flex; align-items:center; justify-content:space-between;">
               <span style="font-size:10px; color:var(--text-secondary); display:flex; align-items:center; gap:4px;">
                 <i class="${typeIcon}" style="font-size:9px; color:var(--accent-primary);"></i>
@@ -5724,7 +5754,7 @@ function showCalendarOptionsPopover(e, block, view) {
               <input type="checkbox" class="cal-prop-check" data-col-id="${c.id}" style="cursor:pointer;" ${isChecked ? 'checked' : ''}>
             </div>
           `;
-  }).join('')}
+        }).join('')}
         ${addableCols.length === 0 ? '<div style="font-size:10px; color:var(--text-muted); text-align:center; padding:4px 0;">追加できる列がありません</div>' : ''}
       </div>
 
@@ -5740,6 +5770,11 @@ function showCalendarOptionsPopover(e, block, view) {
     evt.stopPropagation();
     view.calShowTitle = showTitleCheck.checked;
     view.calShowTime = showTimeCheck.checked;
+
+    const dateModeSelect = popover.querySelector('#cal-date-mode-select');
+    if (dateModeSelect && dateCol) {
+      dateCol.dateDisplayMode = dateModeSelect.value;
+    }
 
     // チェックされている列IDを集約して保存！
     const propChecks = popover.querySelectorAll('.cal-prop-check');
@@ -6068,10 +6103,11 @@ function renderCalendarViewDOM(block, rowDataList) {
       // 1.5 日付の表示モード反映テキストの追加
       if (dateCol) {
         const rawDateVal = evt.row[dateCol.id];
-        if (dateCol.displayMode && dateCol.displayMode !== 'date') {
+        const displayMode = dateCol.dateDisplayMode || 'date';
+        if (displayMode !== 'date') {
           const displayDateStr = formatDatePropertyValueForDisplay(rawDateVal, dateCol);
           if (displayDateStr) {
-            badgeContent += `<span style="font-size: 8px; padding: 0.5px 3.5px; background: rgba(0, 0, 0, 0.28); border-radius: 4px; color: #a78bfa; font-weight: bold; white-space: nowrap; scale: 0.95; display: inline-block;">${escapeHTML(displayDateStr)}</span>`;
+            badgeContent += `<span class="db-select-badge" style="font-size: 9px; padding: 1px 4.5px; background: rgba(167, 139, 250, 0.18); border: 1px solid rgba(167, 139, 250, 0.35); border-radius: 3px; color: #c084fc; line-height: 1.1; white-space: nowrap; display: inline-block; margin-right: 4px;">${escapeHTML(displayDateStr)}</span>`;
           }
         }
       }
@@ -7598,6 +7634,7 @@ function renderGalleryViewDOM(block, rowDataList) {
       const currentPosY = row._coverPosY !== undefined ? row._coverPosY : 50;
       const currentScale = row._coverScale !== undefined ? row._coverScale : 100;
       img.style.objectPosition = `${currentPosX}% ${currentPosY}%`;
+      img.style.transformOrigin = `${currentPosX}% ${currentPosY}%`;
       img.style.transform = `scale(${currentScale / 100})`;
 
       // エラー発生時はプレースホルダーに切り替えるフォールバック
@@ -7618,6 +7655,10 @@ function renderGalleryViewDOM(block, rowDataList) {
         isRepositioning = true;
         
         repBtn.style.display = 'none';
+
+        // 位置調整中はトランジションを無効化してドラッグ＆ズームをスムーズにする
+        img.style.transition = 'none';
+        card.classList.add('repositioning');
 
         // ドラッグ調整用オーバーレイとコントロール
         const dragOverlay = document.createElement('div');
@@ -7662,6 +7703,7 @@ function renderGalleryViewDOM(block, rowDataList) {
           } else {
             tempScale = Math.max(100, tempScale - zoomStep); // 最小100%
           }
+          img.style.transformOrigin = `${tempPosX}% ${tempPosY}%`;
           img.style.transform = `scale(${tempScale / 100})`;
         };
         coverArea.addEventListener('wheel', onWheel, { passive: false });
@@ -7694,6 +7736,7 @@ function renderGalleryViewDOM(block, rowDataList) {
           tempPosX = Math.max(0, Math.min(100, dragStartPosX - offsetPercentX));
           tempPosY = Math.max(0, Math.min(100, dragStartPosY - offsetPercentY));
           img.style.objectPosition = `${tempPosX}% ${tempPosY}%`;
+          img.style.transformOrigin = `${tempPosX}% ${tempPosY}%`;
         };
 
         const onMouseUp = () => {
@@ -7720,6 +7763,7 @@ function renderGalleryViewDOM(block, rowDataList) {
         cancelBtn.addEventListener('click', (evt) => {
           evt.stopPropagation();
           img.style.objectPosition = `${currentPosX}% ${currentPosY}%`;
+          img.style.transformOrigin = `${currentPosX}% ${currentPosY}%`;
           img.style.transform = `scale(${currentScale / 100})`;
           cleanupReposition();
         });
@@ -7734,6 +7778,11 @@ function renderGalleryViewDOM(block, rowDataList) {
           dragOverlay.remove();
           controls.remove();
           repBtn.style.display = '';
+
+          // transition とクラスを元に戻す
+          img.style.transition = '';
+          card.classList.remove('repositioning');
+
           setTimeout(() => {
             isRepositioning = false;
           }, 100);
@@ -7873,7 +7922,7 @@ function renderGalleryViewDOM(block, rowDataList) {
 
     card.addEventListener('click', () => {
       if (isRepositioning) return;
-      showDbRowEditModal(block, row, rowIndex);
+      showDbRowEditModal(block, row, actualIndex);
     });
 
     grid.appendChild(card);
@@ -8625,17 +8674,19 @@ function showDbRowEditModal(block, row, rowIndex) {
 
         inputWrapper.appendChild(urlWrapper);
       } else {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'db-modal-input-text';
-        input.value = currentVal;
-        input.addEventListener('change', () => {
+        const textarea = document.createElement('textarea');
+        textarea.className = 'db-modal-input-text';
+        textarea.value = currentVal;
+        textarea.style.resize = 'vertical';
+        textarea.style.minHeight = '38px';
+        textarea.style.height = 'auto';
+        textarea.addEventListener('change', () => {
           pushHistory();
-          row[col.id] = input.value.trim();
+          row[col.id] = textarea.value;
           saveNotesToStorage();
           renderEditor();
         });
-        inputWrapper.appendChild(input);
+        inputWrapper.appendChild(textarea);
       }
 
       rowWrapper.appendChild(inputWrapper);
@@ -9048,9 +9099,8 @@ function showSelectTagInline(e, parentWrapper, block, rowIndex, colId, options, 
       createItem.innerHTML = `<i class="fa-solid fa-plus" style="margin-right: 4px;"></i> 「${escapeHTML(query)}」を新規作成`;
       createItem.addEventListener('click', (e) => {
         e.stopPropagation();
-        const colors = ['blue', 'green', 'yellow', 'orange', 'red', 'purple', 'pink', 'gray'];
-        const randomColor = colors[Math.floor(Math.random() * colors.length)];
-        const newOpt = { id: query, name: query, color: randomColor };
+        const hashColor = getTagHashColor(query);
+        const newOpt = { id: query, name: query, color: hashColor };
         if (!col.options) col.options = [];
         col.options.push(newOpt);
         

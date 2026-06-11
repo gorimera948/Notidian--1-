@@ -140,7 +140,7 @@ body {
 
 .sidebar-left.collapsed {
   overflow: visible;
-  border-right-color: transparent;
+  border-right: none !important;
 }
 
 .sidebar-left.collapsed > *:not(.sidebar-toggle-btn) {
@@ -747,7 +747,7 @@ select:focus {
 
 .editor-pane {
   flex: 1;
-  width: 50%;
+  width: 100%;
   height: 100%;
   overflow-y: auto;
   position: relative;
@@ -755,6 +755,10 @@ select:focus {
   display: flex;
   flex-direction: column;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.editor-area.split-view .editor-pane {
+  width: 50%;
 }
 
 .editor-pane:last-of-type {
@@ -1314,8 +1318,8 @@ select:focus {
 }
 
 .sidebar-right.collapsed {
-  overflow: visible;
-  border-left-color: transparent;
+  overflow: visible !important;
+  border-left: none !important;
 }
 
 .sidebar-right.collapsed > *:not(.sidebar-toggle-btn) {
@@ -1327,42 +1331,75 @@ select:focus {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 20px;
-  height: 40px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-light);
-  color: var(--text-secondary);
+  width: 24px;
+  height: 60px;
+  background: rgba(139, 92, 246, 0.85); /* 視認性の高いパープル背景 */
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff; /* 白文字でコントラストを強調 */
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 100;
   transition: var(--transition-smooth);
-  opacity: 0;
+  opacity: 0.8; /* 通常時から高めの不透明度で常時視認可能に */
   padding: 0;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4), 0 0 10px rgba(139, 92, 246, 0.2);
 }
 
 .sidebar-toggle-btn.toggle-left {
-  right: -10px;
+  right: -12px;
   border-radius: 0 8px 8px 0;
 }
 
 .sidebar-toggle-btn.toggle-right {
-  left: -10px;
+  left: -12px;
   border-radius: 8px 0 0 8px;
+}
+
+.sidebar-left.collapsed .sidebar-toggle-btn.toggle-left {
+  right: -24px;
+  opacity: 0.95;
+  background: var(--accent-secondary); /* 畳んでいる時は目を引くピンク */
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 15px rgba(236, 72, 153, 0.5);
+}
+
+.sidebar-right.collapsed .sidebar-toggle-btn.toggle-right {
+  left: -24px;
+  opacity: 0.95;
+  background: var(--accent-secondary); /* 畳んでいる時は目を引くピンク */
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 15px rgba(236, 72, 153, 0.5);
 }
 
 .sidebar-left:hover .sidebar-toggle-btn,
 .sidebar-right:hover .sidebar-toggle-btn,
-.sidebar-left.collapsed .sidebar-toggle-btn,
-.sidebar-right.collapsed .sidebar-toggle-btn {
+.sidebar-left.collapsed:hover .sidebar-toggle-btn,
+.sidebar-right.collapsed:hover .sidebar-toggle-btn {
   opacity: 1;
+  transform: translateY(-50%) scale(1.08); /* ホバー時のスケールアップ効果 */
 }
 
 .sidebar-toggle-btn:hover {
-  background: var(--accent-primary);
-  color: #fff;
-  box-shadow: var(--shadow-glow);
+  background: #ffffff;
+  color: var(--accent-primary);
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.6);
+  border-color: #ffffff;
+}
+
+.sidebar-left.collapsed .sidebar-toggle-btn.toggle-left:hover {
+  right: -24px;
+  background: #ffffff;
+  color: var(--accent-secondary);
+  border-color: #ffffff;
+}
+
+.sidebar-right.collapsed .sidebar-toggle-btn.toggle-right:hover {
+  left: -24px;
+  background: #ffffff;
+  color: var(--accent-secondary);
+  border-color: #ffffff;
 }
 
 .tabs-header {
@@ -1920,6 +1957,7 @@ svg#cumulative-chart {
   outline: none;
   min-height: 18px;
   word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .db-cell-edit:focus {
@@ -3644,6 +3682,14 @@ svg#cumulative-chart {
   word-break: break-all !important;
 }
 
+/* Allow Text cells to wrap nicely and show all newlines */
+.notion-db-table td.cell-type-text .db-cell-edit,
+.notion-db-table td.cell-type-text {
+  white-space: pre-wrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
 /* ==========================================
    PREMIUM POPUP CONFIRMATION & COLOR PALETTE
    ========================================== */
@@ -4017,7 +4063,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   height: 100%;
   backdrop-filter: var(--glass-blur);
   z-index: 10;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .sidebar-right-content {
@@ -4380,6 +4426,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   padding: 8px 10px;
   font-size: 12px;
   outline: none;
+  font-family: inherit;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
