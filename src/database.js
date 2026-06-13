@@ -2660,11 +2660,38 @@ export function showDeleteConfirmPopover(e, message, onConfirm) {
 
   const popover = document.createElement('div');
   popover.className = 'db-floating-popover delete-confirm-popover';
-  popover.style.left = `${e.clientX - 60}px`;
-  popover.style.top = `${e.clientY + 12}px`;
   popover.style.padding = '8px 12px';
   popover.style.width = '180px';
   popover.style.zIndex = '99999';
+
+  // ポップオーバーの予想サイズ
+  const popoverWidth = 180;
+  const popoverHeight = 70;
+
+  // 初期位置計算
+  let left = e.clientX - 60;
+  let top = e.clientY + 12;
+
+  // 右端はみ出し防止
+  if (left + popoverWidth > window.innerWidth) {
+    left = window.innerWidth - popoverWidth - 10;
+  }
+  // 左端はみ出し防止
+  if (left < 10) {
+    left = 10;
+  }
+
+  // 下端はみ出し防止（はみ出る場合はクリック位置の上に表示）
+  if (top + popoverHeight > window.innerHeight) {
+    top = e.clientY - popoverHeight - 12;
+  }
+  // 上端はみ出し防止
+  if (top < 10) {
+    top = 10;
+  }
+
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
 
   popover.innerHTML = `
     <div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; text-align: center;">${message}</div>

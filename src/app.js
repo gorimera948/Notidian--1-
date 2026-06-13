@@ -29,7 +29,8 @@ import {
   closeLinkMenu,
   selectLinkMenuItem,
   navigateLinkMenu,
-  initLinkMenuSearchEvents
+  initLinkMenuSearchEvents,
+  initFloatingToolbar // 追加
 } from './wikilinks.js';
 
 import {
@@ -2338,6 +2339,7 @@ if (timerTargetSelect) {
 function initApp() {
   initStorage();
   initLinkMenuSearchEvents();
+  initFloatingToolbar(); // 追加
   initSlashMenuSortable();
   setupDragSelection();
 

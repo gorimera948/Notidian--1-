@@ -398,3 +398,179 @@ export function checkAndInsertPairBrackets(contentDiv) {
     }
   }
 }
+
+// ==========================================
+// FLOATING TOOLBAR LOGIC FOR WIKILINKS
+// ==========================================
+export function initFloatingToolbar() {
+  const toolbar = document.getElementById('notidian-floating-toolbar');
+  const btnFloating = document.getElementById('btn-floating-wikilink');
+  if (!toolbar || !btnFloating) return;
+
+  const handleLinkInsertion = () => {
+    const sel = window.getSelection();
+    if (sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      let activeContentDiv = document.activeElement;
+      
+      // フォーカスが当たっている要素がエディタかセルでなければ、選択範囲の親要素をたどる
+      if (!activeContentDiv || (!activeContentDiv.classList.contains('block-content') && !activeContentDiv.classList.contains('db-cell-edit'))) {
+        activeContentDiv = range.commonAncestorContainer.ownerDocument.activeElement;
+      }
+      
+      if (!activeContentDiv || (!activeContentDiv.classList.contains('block-content') && !activeContentDiv.classList.contains('db-cell-edit'))) {
+        // フォールバック: 親要素に block-content または db-cell-edit を探す
+        activeContentDiv = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+          ? range.commonAncestorContainer.closest('.block-content, .db-cell-edit')
+          : range.commonAncestorContainer.parentNode.closest('.block-content, .db-cell-edit');
+      }
+
+      if (!activeContentDiv) return;
+
+      const selectedText = range.toString();
+      const trimmedText = selectedText.trim();
+      if (!trimmedText) return;
+
+      const exists = state.notes.some(note => note.title.toLowerCase() === trimmedText.toLowerCase());
+
+      const span = document.createElement('span');
+      span.className = exists ? 'wiki-link' : 'wiki-link wiki-link-new';
+      span.setAttribute('data-target', trimmedText);
+      span.setAttribute('data-bracket', 'en'); // 常にen形式
+      span.setAttribute('title', exists ? 'ノートを開く' : 'ノートを自動作成して開く');
+      span.textContent = selectedText;
+
+      range.deleteContents();
+      range.insertNode(span);
+
+      sel.removeAllRanges();
+      const newRange = document.createRange();
+      newRange.setStartAfter(span);
+      newRange.collapse(true);
+      sel.addRange(newRange);
+
+      if (activeContentDiv.classList.contains('block-content')) {
+        const note = getActiveNote();
+        if (note) {
+          const blockId = activeContentDiv.getAttribute('data-id');
+          if (window.Notidian && typeof window.Notidian.findBlockAndParent === 'function') {
+            const found = window.Notidian.findBlockAndParent(note.blocks, blockId);
+            if (found) {
+              found.block.content = serializeHtmlToWikiText(activeContentDiv);
+            }
+          } else {
+            // グローバル定義がない場合は、ブロック配列を再帰検索
+            const findLocal = (blocksArray) => {
+              for (let b of blocksArray) {
+                if (b.id === blockId) return b;
+                if (b.children) {
+                  const res = findLocal(b.children);
+                  if (res) return res;
+                }
+              }
+              return null;
+            };
+            const targetBlock = findLocal(note.blocks);
+            if (targetBlock) {
+              targetBlock.content = serializeHtmlToWikiText(activeContentDiv);
+            }
+          }
+        }
+        if (window.Notidian && typeof window.Notidian.updateBacklinks === 'function') {
+          window.Notidian.updateBacklinks();
+        }
+      } else if (activeContentDiv.classList.contains('db-cell-edit')) {
+        const tr = activeContentDiv.closest('tr');
+        const td = activeContentDiv.closest('td');
+        if (tr && td) {
+          const tableContainer = tr.closest('.database-container');
+          if (tableContainer) {
+            const blockWrapper = tableContainer.closest('.block-wrapper');
+            const blockId = blockWrapper ? blockWrapper.getAttribute('data-id') : null;
+            const note = getActiveNote();
+            if (note) {
+              let blockObj = null;
+              if (window.Notidian && typeof window.Notidian.findBlockAndParent === 'function') {
+                const found = window.Notidian.findBlockAndParent(note.blocks, blockId);
+                if (found) blockObj = found.block;
+              } else {
+                const findLocal = (blocksArray) => {
+                  for (let b of blocksArray) {
+                    if (b.id === blockId) return b;
+                    if (b.children) {
+                      const res = findLocal(b.children);
+                      if (res) return res;
+                    }
+                  }
+                  return null;
+                };
+                blockObj = findLocal(note.blocks);
+              }
+
+              if (blockObj && blockObj.properties && blockObj.properties.rows) {
+                const rowIndex = Array.from(tr.parentNode.children).indexOf(tr);
+                const colId = td.getAttribute('data-col-id');
+                const rowDataList = blockObj.properties.rows;
+                const row = rowDataList[rowIndex];
+                if (row && colId) {
+                  row[colId] = serializeHtmlToWikiText(activeContentDiv);
+                  const tableEl = tr.closest('table');
+                  if (window.Notidian && typeof window.Notidian.recalculateTableFooter === 'function') {
+                    window.Notidian.recalculateTableFooter(tableEl, blockObj, rowDataList);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      saveNotesToStorage();
+      toolbar.style.display = 'none';
+    }
+  };
+
+  // mousedown で e.preventDefault() し、フォーカス喪失（Selectionクリア）を防ぐ
+  btnFloating.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  btnFloating.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleLinkInsertion();
+  });
+
+  // 選択イベントを監視してツールバーを表示
+  const updateToolbarPosition = () => {
+    const sel = window.getSelection();
+    if (sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      
+      // はみ出し選択に対応するため、選択開始ノードの親要素からターゲットを探索する
+      const container = range.startContainer;
+      const editableParent = container.nodeType === Node.ELEMENT_NODE
+        ? container.closest('.block-content, .db-cell-edit')
+        : (container.parentNode ? container.parentNode.closest('.block-content, .db-cell-edit') : null);
+
+      if (editableParent) {
+        const selectedText = range.toString().trim();
+        if (selectedText.length > 0) {
+          const rect = range.getBoundingClientRect();
+          toolbar.style.display = 'flex';
+          const tbWidth = toolbar.offsetWidth || 85; // ボタンが1つになったので幅を小さく調整
+          const left = rect.left + rect.width / 2 - tbWidth / 2;
+          const top = rect.top - 42;
+          
+          toolbar.style.left = `${Math.max(10, left)}px`;
+          toolbar.style.top = `${Math.max(10, top)}px`;
+          return;
+        }
+      }
+    }
+    toolbar.style.display = 'none';
+  };
+
+  document.addEventListener('selectionchange', updateToolbarPosition);
+  window.addEventListener('scroll', updateToolbarPosition, { passive: true });
+  window.addEventListener('resize', updateToolbarPosition, { passive: true });
+}
