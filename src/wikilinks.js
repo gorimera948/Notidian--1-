@@ -540,8 +540,10 @@ export function initFloatingToolbar() {
     handleLinkInsertion();
   });
 
+  let pinnedPos = null;
+
   // 選択イベントを監視してツールバーを表示
-  const updateToolbarPosition = () => {
+  const updateToolbarPosition = (e) => {
     const sel = window.getSelection();
     if (sel.rangeCount > 0 && !sel.isCollapsed) {
       const range = sel.getRangeAt(0);
@@ -555,11 +557,19 @@ export function initFloatingToolbar() {
       if (editableParent) {
         const selectedText = range.toString().trim();
         if (selectedText.length > 0) {
-          const rect = range.getBoundingClientRect();
+          // ドラッグ開始時点（最初に選択が検知された瞬間）の位置を記録する
+          if (!pinnedPos || (e && e.type === 'selectionchange' && toolbar.style.display !== 'flex')) {
+            const rect = range.getBoundingClientRect();
+            pinnedPos = {
+              left: rect.left + rect.width / 2 + window.scrollX,
+              top: rect.top + window.scrollY
+            };
+          }
+
           toolbar.style.display = 'flex';
           const tbWidth = toolbar.offsetWidth || 85; // ボタンが1つになったので幅を小さく調整
-          const left = rect.left + rect.width / 2 - tbWidth / 2;
-          const top = rect.top - 42;
+          const left = pinnedPos.left - tbWidth / 2 - window.scrollX;
+          const top = pinnedPos.top - 42 - window.scrollY;
           
           toolbar.style.left = `${Math.max(10, left)}px`;
           toolbar.style.top = `${Math.max(10, top)}px`;
@@ -568,6 +578,7 @@ export function initFloatingToolbar() {
       }
     }
     toolbar.style.display = 'none';
+    pinnedPos = null;
   };
 
   document.addEventListener('selectionchange', updateToolbarPosition);

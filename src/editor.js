@@ -397,6 +397,7 @@ export function renderEditor() {
 
     // キャンバス
     const canvas = document.createElement('div');
+    canvas.id = 'block-canvas';
     canvas.className = 'block-canvas';
 
     if (note.blocks.length === 0) {
@@ -1360,6 +1361,63 @@ function handleEditorKeydown(e, block, contentDiv) {
   }
 
   if (e.key === 'Backspace') {
+    // --- ハイライト（WikiLink）のバックスペース一括削除処理 ---
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      let node = range.startContainer;
+      let offset = range.startOffset;
+      let targetSpan = null;
+
+      // 1. カーソルが WikiLink の内部にある場合
+      let temp = node;
+      while (temp && temp !== contentDiv) {
+        if (temp.nodeType === Node.ELEMENT_NODE && temp.classList.contains('wiki-link')) {
+          targetSpan = temp;
+          break;
+        }
+        temp = temp.parentNode;
+      }
+
+      // 2. カーソルが WikiLink の直後にある場合
+      if (!targetSpan) {
+        if (node.nodeType === Node.TEXT_NODE && offset === 0) {
+          let prev = node.previousSibling;
+          if (prev && prev.nodeType === Node.ELEMENT_NODE && prev.classList.contains('wiki-link')) {
+            targetSpan = prev;
+          }
+        } else if (node.nodeType === Node.ELEMENT_NODE && offset > 0) {
+          let prev = node.childNodes[offset - 1];
+          if (prev && prev.nodeType === Node.ELEMENT_NODE && prev.classList.contains('wiki-link')) {
+            targetSpan = prev;
+          }
+        }
+      }
+
+      if (targetSpan) {
+        e.preventDefault();
+        const parent = targetSpan.parentNode;
+        let prevTextNode = targetSpan.previousSibling;
+
+        if (!prevTextNode || prevTextNode.nodeType !== Node.TEXT_NODE) {
+          prevTextNode = document.createTextNode('');
+          parent.insertBefore(prevTextNode, targetSpan);
+        }
+
+        parent.removeChild(targetSpan);
+
+        const newRange = document.createRange();
+        newRange.setStart(prevTextNode, prevTextNode.length);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+
+        block.content = serializeHtmlToWikiText(contentDiv);
+        saveNotesToStorage();
+        return;
+      }
+    }
+
     const text = contentDiv.textContent;
     if (text.length === 0) {
       e.preventDefault();
