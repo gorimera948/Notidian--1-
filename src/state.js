@@ -324,7 +324,7 @@ const sampleNotes = [
       { id: generateId(), type: 'h2', content: '🔄 自動保存とグラフ化の流れ' },
       { id: generateId(), type: 'todo', content: 'タイマーのスケジュールで「追加」を押し、タスクを選択します。（テスト用に10秒のセットを作るのがおすすめです！）', properties: { checked: false } },
       { id: generateId(), type: 'todo', content: 'タイマーを「開始」します。作業時間が終了すると美しくチャイムが鳴り、自動的に右パネルの「ポモドーロ分析」データベーステーブルにタスク名と時間が記録されます。', properties: { checked: false } },
-      { id: generateId(), type: 'todo', content: '保存されたタスク時間は、過去7日間の「累計集中時間」棒グラフ（SVG）や、タスク別の比率メーターとして動的に可視化されます！', properties: { checked: false } },
+      { id: generateId(), type: 'todo', content: '保存されたタスク時間は、過去7日間の「累計作業時間」棒グラフ（SVG）や、タスク別の比率メーターとして動的に可視化されます！', properties: { checked: false } },
       { id: generateId(), type: 'p', content: '記録されたデータテーブルは、タスク名や時間をその場でダブルクリック（またはクリック）して編集・削除可能です。Notionのようなデータベース感覚で学習状況を維持できます。' }
     ]
   }

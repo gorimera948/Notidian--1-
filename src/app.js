@@ -2155,7 +2155,7 @@ function renderSvgChart() {
     rect.setAttribute('height', Math.max(2, barHeight));
 
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `${day.dateStr}\n集中時間: ${day.minutes}分 (${(day.minutes / 60).toFixed(1)}時間)`;
+    title.textContent = `${day.dateStr}\n作業時間: ${day.minutes}分 (${(day.minutes / 60).toFixed(1)}時間)`;
     rect.appendChild(title);
     cumulativeChart.appendChild(rect);
 
@@ -2747,6 +2747,87 @@ function initApp() {
       }, 300);
     });
   }
+
+  // --- 左右サイドバーのタブ切り替え機能 ---
+  function initSidebarTabs() {
+    // 1. 左サイドバーのタブ設定
+    const leftTabBtns = document.querySelectorAll('#left-sidebar-tabs .sidebar-tab-btn');
+    const leftTabContents = document.querySelectorAll('.sidebar-left .sidebar-tab-content');
+    const savedLeftTab = localStorage.getItem('notidian_active_left_tab') || 'tab-notes';
+
+    const switchLeftTab = (tabId) => {
+      leftTabBtns.forEach(btn => {
+        if (btn.getAttribute('data-tab') === tabId) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+      leftTabContents.forEach(content => {
+        if (content.id === tabId) {
+          content.classList.add('active');
+        } else {
+          content.classList.remove('active');
+        }
+      });
+      localStorage.setItem('notidian_active_left_tab', tabId);
+    };
+
+    leftTabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tabId = btn.getAttribute('data-tab');
+        switchLeftTab(tabId);
+      });
+    });
+    switchLeftTab(savedLeftTab);
+
+    // 2. 右サイドバーのタブ設定
+    const rightTabBtns = document.querySelectorAll('#right-sidebar-tabs .sidebar-tab-btn');
+    const rightTabContents = document.querySelectorAll('.sidebar-right .sidebar-tab-content');
+    const savedRightTab = localStorage.getItem('notidian_active_right_tab') || 'tab-analytics';
+
+    const switchRightTab = (tabId) => {
+      rightTabBtns.forEach(btn => {
+        if (btn.getAttribute('data-tab') === tabId) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+      rightTabContents.forEach(content => {
+        if (content.id === tabId) {
+          content.classList.add('active');
+        } else {
+          content.classList.remove('active');
+        }
+      });
+      localStorage.setItem('notidian_active_right_tab', tabId);
+
+      // 分析・マップタブへの切り替え時の処理
+      if (tabId === 'tab-analytics') {
+        if (typeof renderAnalytics === 'function') {
+          renderAnalytics();
+        }
+      } else if (tabId === 'tab-mindmap') {
+        if (mindMapInstance) {
+          setTimeout(() => {
+            mindMapInstance.resizeCanvas();
+            mindMapInstance.triggerSimulation();
+          }, 50);
+        }
+      }
+    };
+
+    rightTabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tabId = btn.getAttribute('data-tab');
+        switchRightTab(tabId);
+      });
+    });
+    switchRightTab(savedRightTab);
+  }
+
+  initSidebarTabs();
 }
 
 // Race Condition 対策を施した確実な初期化実行
