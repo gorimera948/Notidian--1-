@@ -280,6 +280,30 @@ export function renderEditor() {
     const toolbarRight = document.createElement('div');
     toolbarRight.className = 'editor-actions';
 
+    // 書き出しボタン
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn-secondary btn-export-data';
+    exportBtn.style = 'display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; margin-right: 6px;';
+    exportBtn.innerHTML = '<i class="fa-solid fa-file-export"></i> <span>書き出し</span>';
+    exportBtn.title = 'すべてのデータをJSONファイルとしてエクスポートします';
+    exportBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      exportAllData();
+    });
+    toolbarRight.appendChild(exportBtn);
+
+    // 読み込みボタン
+    const importBtn = document.createElement('button');
+    importBtn.className = 'btn-secondary btn-import-data';
+    importBtn.style = 'display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; margin-right: 6px;';
+    importBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> <span>読み込み</span>';
+    importBtn.title = 'JSONファイルからデータをインポートし、現在のデータを上書きします';
+    importBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerImportData();
+    });
+    toolbarRight.appendChild(importBtn);
+
     const splitBtn = document.createElement('button');
     splitBtn.className = 'btn-secondary';
     splitBtn.style = 'display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;';
@@ -341,6 +365,22 @@ export function renderEditor() {
     const titleActions = document.createElement('div');
     titleActions.className = 'note-title-actions';
     titleActions.style = 'display: flex; align-items: center; gap: 8px; flex-shrink: 0;';
+
+    // 音声入力ボタン
+    const micBtn = document.createElement('button');
+    micBtn.className = `btn-mic-toggle ${activeMicButton ? 'recording' : ''}`;
+    micBtn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    micBtn.title = activeMicButton ? '音声文字起こし中... (クリックで停止)' : '音声文字起こしを開始';
+    micBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSpeechRecognition(micBtn);
+    });
+    titleActions.appendChild(micBtn);
+
+    // 再描画時に音声認識が動いている場合、新しいボタン参照を保持する
+    if (activeMicButton) {
+      activeMicButton = micBtn;
+    }
 
     const favBtn = document.createElement('button');
     favBtn.className = `btn-favorite-toggle ${note.isFavorite ? 'active' : ''}`;
@@ -3823,5 +3863,271 @@ export function showLinkEditPopover(extLinkEl) {
     labelInput.select();
   }, 10);
 }
+
+// ==========================================
+// 10. SPEECH TO TEXT & DATA SYNC (EXPORT/IMPORT) FUNCTIONS
+// ==========================================
+
+let recognitionInstance = null;
+let activeMicButton = null;
+
+function getSpeechRecognitionInstance() {
+  if (recognitionInstance) return recognitionInstance;
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return null;
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'ja-JP';
+  recognition.continuous = true;
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    if (activeMicButton) {
+      activeMicButton.classList.add('recording');
+      activeMicButton.title = '音声文字起こし中... (クリックで停止)';
+      activeMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    }
+  };
+
+  recognition.onresult = (event) => {
+    let resultText = '';
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        resultText += event.results[i][0].transcript;
+      }
+    }
+    if (resultText) {
+      insertSpeechText(resultText);
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Speech recognition error:', event.error);
+    if (event.error !== 'aborted') {
+      let msg = '音声認識エラーが発生しました: ' + event.error;
+      if (event.error === 'not-allowed') {
+        msg = 'マイクの使用が許可されていません。ブラウザのアドレスバーの左側（鍵マークや設定アイコン）から、マイクのアクセス許可を有効にしてください。\n\n※file:// スキーム（ローカルのHTMLファイルを直接ダブルクリックで開いた場合）では、ブラウザのセキュリティ制限によりマイクが使用できません。npm run dev または npx vite で起動したWebサーバー（http://localhost:5173 など）経由でアクセスしてください。';
+      } else if (event.error === 'no-speech') {
+        msg = '音声が検出されませんでした。マイクが正しく接続されているか確認し、もう一度お話しください。';
+      } else if (event.error === 'network') {
+        msg = 'ネットワークエラーが発生しました。音声認識の実行にはインターネット接続が必要です。';
+      }
+      alert(msg);
+    }
+    stopSpeechRecognition();
+  };
+
+  recognition.onend = () => {
+    stopSpeechRecognition();
+  };
+
+  recognitionInstance = recognition;
+  return recognitionInstance;
+}
+
+export function stopSpeechRecognition() {
+  if (recognitionInstance) {
+    try {
+      recognitionInstance.stop();
+    } catch (e) {
+      // 停止時エラーは無視
+    }
+  }
+  if (activeMicButton) {
+    activeMicButton.classList.remove('recording');
+    activeMicButton.title = '音声文字起こしを開始';
+    activeMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    activeMicButton = null;
+  }
+}
+
+function toggleSpeechRecognition(micBtn) {
+  const recognition = getSpeechRecognitionInstance();
+  if (!recognition) {
+    alert('このブラウザは音声認識に対応していません。ChromeやSafariなどをお試しください。');
+    return;
+  }
+
+  if (activeMicButton) {
+    stopSpeechRecognition();
+    return;
+  }
+
+  activeMicButton = micBtn;
+
+  try {
+    recognition.start();
+  } catch (e) {
+    console.error('Failed to start speech recognition:', e);
+    try {
+      recognition.stop();
+      setTimeout(() => {
+        recognition.start();
+      }, 200);
+    } catch (err) {
+      alert('音声認識の開始に失敗しました: ' + e.message);
+    }
+  }
+}
+
+function insertSpeechText(text) {
+  const activeNote = getActiveNote();
+  if (!activeNote) return;
+
+  // フォーカスがある要素、または最後にフォーカスされていた要素を取得
+  let targetEl = document.activeElement;
+  if (!targetEl || !targetEl.classList.contains('block-content')) {
+    if (state.lastActiveEditTarget && document.body.contains(state.lastActiveEditTarget)) {
+      targetEl = state.lastActiveEditTarget;
+    } else {
+      targetEl = null;
+    }
+  }
+
+  if (targetEl) {
+    targetEl.focus();
+    
+    // カーソル位置（セレクション）にテキストを挿入
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      
+      const textNode = document.createTextNode(text);
+      range.insertNode(textNode);
+      
+      range.setStartAfter(textNode);
+      range.setEndAfter(textNode);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      
+      // inputイベントを発火させデータを同期
+      targetEl.dispatchEvent(new Event('input', { bubbles: true }));
+      
+      const blockId = targetEl.getAttribute('data-id');
+      const found = findBlockAndParent(activeNote.blocks, blockId);
+      if (found && found.block) {
+        found.block.content = serializeHtmlToWikiText(targetEl);
+        saveNotesToStorage();
+      }
+    } else {
+      targetEl.textContent += text;
+      targetEl.dispatchEvent(new Event('input', { bubbles: true }));
+      const blockId = targetEl.getAttribute('data-id');
+      const found = findBlockAndParent(activeNote.blocks, blockId);
+      if (found && found.block) {
+        found.block.content = serializeHtmlToWikiText(targetEl);
+        saveNotesToStorage();
+      }
+    }
+  } else {
+    // フォーカスされているブロックがない場合はノートの末尾に追加
+    const newBlock = { id: generateId(), type: 'p', content: text };
+    activeNote.blocks.push(newBlock);
+    saveNotesToStorage();
+    renderEditor();
+    
+    setTimeout(() => {
+      const newEl = document.querySelector(`.block-content[data-id="${newBlock.id}"]`);
+      if (newEl) {
+        focusBlock(newEl);
+      }
+    }, 50);
+  }
+}
+
+export function exportAllData() {
+  const data = {
+    notes: JSON.parse(localStorage.getItem('notidian_notes')) || [],
+    folders: JSON.parse(localStorage.getItem('notidian_folders')) || [],
+    collapsedFolders: JSON.parse(localStorage.getItem('notidian_collapsed_folders')) || [],
+    dailyFolderId: localStorage.getItem('notidian_daily_folder_id') || '',
+    focusLogs: JSON.parse(localStorage.getItem('notidian_focus_logs')) || [],
+    customTagColors: JSON.parse(localStorage.getItem('notidian_custom_tag_colors')) || {}
+  };
+
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  
+  const a = document.createElement('a');
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const date = String(d.getDate()).padStart(2, '0');
+  const dateStr = `${year}${month}${date}`;
+  a.href = url;
+  a.download = `notidian_backup_${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function triggerImportData() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = JSON.parse(evt.target.result);
+        if (!data || !Array.isArray(data.notes)) {
+          alert('不正なバックアップファイルです。有効な Notidian バックアップ JSON を選択してください。');
+          return;
+        }
+
+        if (confirm('データをインポートすると、現在のすべてのノートや設定が上書きされます。よろしいですか？')) {
+          if (data.notes) {
+            localStorage.setItem('notidian_notes', JSON.stringify(data.notes));
+            state.notes = data.notes;
+          }
+          if (data.folders) {
+            localStorage.setItem('notidian_folders', JSON.stringify(data.folders));
+            state.folders = data.folders;
+          }
+          if (data.collapsedFolders) {
+            localStorage.setItem('notidian_collapsed_folders', JSON.stringify(data.collapsedFolders));
+            state.collapsedFolders = data.collapsedFolders;
+          }
+          if (data.dailyFolderId !== undefined) {
+            localStorage.setItem('notidian_daily_folder_id', data.dailyFolderId);
+            state.dailyFolderId = data.dailyFolderId;
+          }
+          if (data.focusLogs) {
+            localStorage.setItem('notidian_focus_logs', JSON.stringify(data.focusLogs));
+            state.focusLogs = data.focusLogs;
+          }
+          if (data.customTagColors) {
+            localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(data.customTagColors));
+            state.customTagColors = data.customTagColors;
+          }
+
+          if (state.notes.length > 0) {
+            state.activeNoteId = state.notes[0].id;
+            state.panes = [
+              { activeNoteId: state.activeNoteId, noteHistory: [state.activeNoteId], historyIndex: 0 },
+              { activeNoteId: null, noteHistory: [], historyIndex: -1 }
+            ];
+            localStorage.setItem('notidian_active_note_id', state.activeNoteId);
+          }
+
+          alert('データのインポートが完了しました。');
+          window.location.reload();
+        }
+      } catch (err) {
+        alert('ファイルの読み込みに失敗しました: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.click();
+}
+
 
 

@@ -1962,6 +1962,53 @@ export function overwriteTemplateFromActiveDaily() {
   }
 }
 
+// Copy focus table logs to clipboard in TSV format for Excel
+export function copyFocusTableToExcel() {
+  if (state.focusLogs.length === 0) {
+    showToast('コピーするデータがありません。');
+    return;
+  }
+
+  // 1. ヘッダー行を作成
+  const headers = ['日付', 'タスク名', '時間(分)', 'ステータス'];
+  const tsvLines = [headers.join('\t')];
+
+  // 2. 日付の降順でソート（表示順に合わせる）
+  const sortedLogs = [...state.focusLogs].sort((a, b) => b.timestamp - a.timestamp);
+
+  // 3. データ行を作成
+  sortedLogs.forEach(log => {
+    const row = [
+      log.date || '',
+      log.taskName || '名称未設定タスク',
+      `${log.duration}分`,
+      log.status || ''
+    ];
+    
+    // Excel用にエスケープ処理
+    const escapedRow = row.map(val => {
+      let strVal = String(val);
+      if (strVal.includes('\t') || strVal.includes('\n') || strVal.includes('\r') || strVal.includes('"')) {
+        strVal = `"${strVal.replace(/"/g, '""')}"`;
+      }
+      return strVal;
+    });
+    
+    tsvLines.push(escapedRow.join('\t'));
+  });
+
+  const tsvContent = tsvLines.join('\n');
+  navigator.clipboard.writeText(tsvContent).then(() => {
+    showToast('作業時間データをExcel用にコピーしました。');
+  }).catch(err => {
+    console.error('コピーに失敗しました', err);
+    showToast('コピーに失敗しました。');
+  });
+}
+
+// グローバルスコープに公開してHTMLのonclickから呼び出せるようにする
+window.copyFocusTableToExcel = copyFocusTableToExcel;
+
 // ==========================================
 // ANALYTICS & FOCUS TABLES
 // ==========================================

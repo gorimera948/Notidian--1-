@@ -1955,6 +1955,25 @@ svg#cumulative-chart {
   opacity: 1;
 }
 
+.btn-insert-db-row {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 9px;
+  padding: 0;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-insert-db-row:hover {
+  color: var(--accent-green, #10b981);
+}
+
 .btn-delete-db-row {
   background: none;
   border: none;
@@ -1976,14 +1995,16 @@ svg#cumulative-chart {
 
 /* Header design */
 .notion-db-table th {
-  background: rgba(255, 255, 255, 0.02);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #0c0f17; /* 透けないように不透明なエディタ背景色を指定 */
   font-weight: 500;
   color: var(--text-secondary);
   border-bottom: 1.5px solid var(--border-light);
   border-right: 1px solid var(--border-light);
   padding: 8px 10px;
   text-align: left;
-  position: relative;
   height: 38px;
   max-height: 38px;
   overflow: hidden;
@@ -2449,6 +2470,9 @@ svg#cumulative-chart {
 }
 
 .db-group-subtable {
+  max-height: 300px;
+  overflow-y: auto;
+  overflow-x: auto;
   transition: max-height 0.2s ease-out;
 }
 
@@ -5092,6 +5116,59 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   color: var(--accent-primary, #8b5cf6);
   transform: translateY(-1px);
 }
+
+/* ==========================================================================
+   Speech to Text (Mic Button) & Data Sync Style Extensions
+   ========================================================================== */
+
+.btn-mic-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.btn-mic-toggle:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btn-mic-toggle.recording {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.1);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
+}
+
+.btn-mic-toggle.recording i {
+  animation: pulse-mic 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse-mic {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.5; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Data Sync Toolbar Buttons */
+.btn-export-data:hover {
+  background: rgba(16, 185, 129, 0.15) !important;
+  border-color: #10b981 !important;
+  color: #34d399 !important;
+}
+
+.btn-import-data:hover {
+  background: rgba(59, 130, 246, 0.15) !important;
+  border-color: #3b82f6 !important;
+  color: #60a5fa !important;
+}
+
 
 
 

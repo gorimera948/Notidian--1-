@@ -77,6 +77,29 @@ function addNewDbRow(block, initialData = {}) {
   renderEditor();
 }
 
+function insertDbRow(block, index, initialData = {}) {
+  block.properties = block.properties || { columns: [], rows: [] };
+  block.properties.rows = block.properties.rows || [];
+
+  const newRow = {};
+  block.properties.columns.forEach(col => {
+    if (initialData[col.id] !== undefined) {
+      newRow[col.id] = initialData[col.id];
+    } else {
+      if (col.type === 'status') {
+        const defaultOpt = col.options && col.options.length > 0 ? col.options[0].name : '未着手';
+        newRow[col.id] = defaultOpt;
+      }
+      else if (col.type === 'checkbox') newRow[col.id] = false;
+      else newRow[col.id] = '';
+    }
+  });
+
+  block.properties.rows.splice(index + 1, 0, newRow);
+  saveNotesToStorage();
+  renderEditor();
+}
+
 function deleteDbRow(block, rowIndex, e) {
   showDeleteConfirmPopover(e, 'この行を削除しますか？', () => {
     block.properties.rows.splice(rowIndex, 1);
@@ -194,7 +217,7 @@ function setupDbColumnResizer(resizerEl, col, th, table, block, visibleRows) {
     // 右隣の列のモデル（プロパティ）を取得
     const nextCol = isLeftCol ? block.properties.columns[0] : block.properties.columns[colIndex];
 
-    const startWidth = isLeftCol ? (block.properties.leftColWidth || 34) : (col.width || th.getBoundingClientRect().width);
+    const startWidth = isLeftCol ? (block.properties.leftColWidth || 48) : (col.width || th.getBoundingClientRect().width);
     const startNextWidth = (nextTh && nextCol) ? nextCol.width : null;
 
     function onMouseMove(moveEvent) {
@@ -257,7 +280,7 @@ function setupDbColumnResizer(resizerEl, col, th, table, block, visibleRows) {
       }
 
       // 3. テーブル全体の合計幅を再計算してリアルタイム同期（吸い付きリサイズと余白バグ解消）
-      const leftColW = block.properties.leftColWidth || 34;
+      const leftColW = block.properties.leftColWidth || 48;
       let totalW = leftColW;
       block.properties.columns.forEach(c => {
         totalW += c.width || (c.type === 'text' && c.id === 'col-title' ? 220 : 130);
@@ -594,7 +617,7 @@ export function createDatabaseDOM(block) {
         const tagOptions = col.options || [];
         const currentVals = currentVal.split(',').map(v => v.trim()).filter(Boolean);
         const names = currentVals.map(val => {
-          const found = tagOptions.find(o => (typeof o === 'string' ? o : (o.id || o.name)) === val);
+          const found = tagOptions.find(o => (typeof o === 'string' ? o.toLowerCase() : (o.id || o.name).toLowerCase()) === val.toLowerCase());
           return found ? (typeof found === 'string' ? found : found.name) : val;
         });
         displayLabel = names.join(', ');
@@ -635,6 +658,7 @@ export function createDatabaseDOM(block) {
 
         const tagOptions = col.options || [];
         const currentVals = currentVal.split(',').map(v => v.trim()).filter(Boolean);
+        const currentValsLower = currentVals.map(v => v.toLowerCase());
 
         if (tagOptions.length === 0) {
           const emptyItem = document.createElement('div');
@@ -646,7 +670,7 @@ export function createDatabaseDOM(block) {
             const optId = typeof opt === 'string' ? opt : (opt.id || opt.name);
             const optName = typeof opt === 'string' ? opt : opt.name;
             const color = typeof opt === 'string' ? 'gray' : (opt.color || 'gray');
-            const isChecked = currentVals.includes(optId) || currentVals.includes(optName);
+            const isChecked = currentValsLower.includes(optId.toLowerCase()) || currentValsLower.includes(optName.toLowerCase());
 
             const item = document.createElement('div');
             item.className = 'db-popover-item';
@@ -744,7 +768,7 @@ export function createDatabaseDOM(block) {
 
     const popover = document.createElement('div');
     popover.className = 'db-floating-popover';
-    popover.style.width = '155px';
+    popover.style.width = '170px';
     popover.style.left = `${e.clientX}px`;
     popover.style.top = `${e.clientY + 12}px`;
 
@@ -759,6 +783,18 @@ export function createDatabaseDOM(block) {
       exportToCSV(block);
     });
     popover.appendChild(exportItem);
+
+    // Excel用にコピー項目
+    const copyExcelItem = document.createElement('div');
+    copyExcelItem.className = 'db-popover-item';
+    copyExcelItem.style.whiteSpace = 'nowrap';
+    copyExcelItem.innerHTML = '<i class="fa-solid fa-copy" style="width:14px;"></i> Excel用にコピー';
+    copyExcelItem.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      popover.remove();
+      copyTableToTSV(block, false);
+    });
+    popover.appendChild(copyExcelItem);
 
     // インポート項目
     const importItem = document.createElement('div');
@@ -827,36 +863,46 @@ export function createDatabaseDOM(block) {
         }
         if (col.type === 'select') {
           const tagOptions = col.options || [];
-          const getTagName = (idOrName) => {
-            const found = tagOptions.find(o => {
-              const oid = typeof o === 'string' ? o : (o.id || o.name);
-              const oname = typeof o === 'string' ? o : o.name;
-              return oid.toLowerCase() === idOrName.toLowerCase() || oname.toLowerCase() === idOrName.toLowerCase();
-            });
-            return found ? (typeof found === 'string' ? found : found.name) : idOrName;
-          };
-          const getTagId = (idOrName) => {
-            const found = tagOptions.find(o => {
-              const oid = typeof o === 'string' ? o : (o.id || o.name);
-              const oname = typeof o === 'string' ? o : o.name;
-              return oid.toLowerCase() === idOrName.toLowerCase() || oname.toLowerCase() === idOrName.toLowerCase();
-            });
-            return found ? (typeof found === 'string' ? found : (found.id || found.name)) : idOrName;
-          };
-
-          const valLower = String(val || '').trim().toLowerCase();
-          const valName = getTagName(valLower).trim().toLowerCase();
-          const valId = getTagId(valLower).trim().toLowerCase();
-
-          const filterVals = typeof filterVal === 'string' ? filterVal.split(',').map(t => t.trim().toLowerCase()) : [];
+          const rowTags = String(val || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+          const filterVals = typeof filterVal === 'string' ? filterVal.split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [];
           if (filterVals.length === 0) return true;
 
-          return filterVals.some(fVal => {
-            const fName = getTagName(fVal).trim().toLowerCase();
-            const fId = getTagId(fVal).trim().toLowerCase();
-            return valLower === fVal || valName === fVal || valId === fVal || 
-                   valLower === fName || valName === fName || valId === fName || 
-                   valLower === fId || valName === fId || valId === fId;
+          return rowTags.some(rt => {
+            return filterVals.some(fv => {
+              if (rt === fv) return true;
+              
+              const optForRt = tagOptions.find(o => {
+                const oid = typeof o === 'string' ? o : (o.id || o.name);
+                const oname = typeof o === 'string' ? o : o.name;
+                return oid.toLowerCase() === rt || oname.toLowerCase() === rt;
+              });
+              
+              const optForFv = tagOptions.find(o => {
+                const oid = typeof o === 'string' ? o : (o.id || o.name);
+                const oname = typeof o === 'string' ? o : o.name;
+                return oid.toLowerCase() === fv || oname.toLowerCase() === fv;
+              });
+              
+              if (optForRt && optForFv) {
+                const rtId = typeof optForRt === 'string' ? optForRt : (optForRt.id || optForRt.name);
+                const fvId = typeof optForFv === 'string' ? optForFv : (optForFv.id || optForFv.name);
+                if (rtId.toLowerCase() === fvId.toLowerCase()) return true;
+              }
+              
+              if (optForRt) {
+                const rtId = typeof optForRt === 'string' ? optForRt : (optForRt.id || optForRt.name);
+                const rtName = typeof optForRt === 'string' ? optForRt : optForRt.name;
+                if (rtId.toLowerCase() === fv || rtName.toLowerCase() === fv) return true;
+              }
+              
+              if (optForFv) {
+                const fvId = typeof optForFv === 'string' ? optForFv : (optForFv.id || optForFv.name);
+                const fvName = typeof optForFv === 'string' ? optForFv : optForFv.name;
+                if (fvId.toLowerCase() === rt || fvName.toLowerCase() === rt) return true;
+              }
+              
+              return false;
+            });
           });
         }
         if (col.type === 'checkbox') {
@@ -1062,8 +1108,10 @@ export function createDatabaseDOM(block) {
     } else {
       // 5. 通常フラットテーブル表示
       const flatTableWrapper = document.createElement('div');
-      flatTableWrapper.style.padding = '16px';
+      flatTableWrapper.style.padding = '0 16px 16px 16px';
       flatTableWrapper.style.overflowX = 'auto';
+      flatTableWrapper.style.overflowY = 'auto';
+      flatTableWrapper.style.maxHeight = '450px';
 
       const flatTable = renderSingleTableDOM(block, visibleRows, (newRowData) => {
         // フィルター条件をすべて自動セット（AND結合の特性）
@@ -1098,7 +1146,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
   const headerTr = document.createElement('tr');
 
   // 削除用・一括選択用制御列のth（全選択チェックボックスの復元・新設）
-  const leftColWidth = block.properties.leftColWidth || 34;
+  const leftColWidth = block.properties.leftColWidth || 48;
   const controlTh = document.createElement('th');
   controlTh.className = 'db-row-controls-header';
   controlTh.style.width = `${leftColWidth}px`;
@@ -1297,12 +1345,6 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
         }
         return;
       }
-      e.stopPropagation();
-      const checkbox = tr.querySelector('.db-row-select-check');
-      if (checkbox) {
-        checkbox.checked = !checkbox.checked;
-        handleRowClick(e, block, row, rowDataList.indexOf(row), rowDataList, checkbox);
-      }
     });
     // 削除・一括選択コントロールtd（極小コンパクト化）
     const controlTd = document.createElement('td');
@@ -1332,6 +1374,16 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     dragHandle.title = 'ドラッグして行を並べ替え';
     dragHandle.innerHTML = '<i class="fa-solid fa-grip-vertical"></i>';
     controlsWrapper.appendChild(dragHandle);
+
+    const insertBtn = document.createElement('button');
+    insertBtn.className = 'btn-insert-db-row';
+    insertBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
+    insertBtn.title = '下に行を挿入';
+    insertBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      insertDbRow(block, actualIndex);
+    });
+    controlsWrapper.appendChild(insertBtn);
 
     const delBtn = document.createElement('button');
     delBtn.className = 'btn-delete-db-row';
@@ -1404,7 +1456,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
             removeBtn.addEventListener('click', (e) => {
               e.stopPropagation();
               pushHistory();
-              const newTags = tags.filter(t => t !== tagVal);
+              const newTags = tags.filter(t => t.toLowerCase() !== tagVal.toLowerCase());
               row[col.id] = newTags.join(', ');
               saveNotesToStorage();
               renderEditor();
@@ -3025,10 +3077,11 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
   // 既存タグの生成
   const items = [];
   const tags = String(currentVal || '').split(',').map(t => t.trim()).filter(Boolean);
+  const tagsLower = tags.map(t => t.toLowerCase());
   
   tagOptions.forEach(opt => {
     const item = document.createElement('div');
-    const isAct = tags.includes(opt.name);
+    const isAct = tagsLower.includes(opt.name.toLowerCase());
     item.className = `db-popover-item ${isAct ? 'active' : ''}`;
     
     const checkIcon = isAct ? '<i class="fa-solid fa-check" style="margin-right: 6px; font-size: 10px; color: var(--accent-primary);"></i>' : '';
@@ -3040,9 +3093,10 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       
       let newTags;
       if (isAct) {
-        newTags = tags.filter(t => t !== opt.name);
+        newTags = tags.filter(t => t.toLowerCase() !== opt.name.toLowerCase());
       } else {
-        newTags = [...tags, opt.name];
+        const exists = tags.some(t => t.toLowerCase() === opt.name.toLowerCase());
+        newTags = exists ? tags : [...tags, opt.name];
       }
       
       block.properties.rows[rowIndex][colId] = newTags.join(', ');
@@ -3115,7 +3169,8 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       }
       
       const currentTags = String(block.properties.rows[rowIndex][colId] || '').split(',').map(t => t.trim()).filter(Boolean);
-      if (!currentTags.includes(found.name)) {
+      const hasTag = currentTags.some(t => t.toLowerCase() === found.name.toLowerCase());
+      if (!hasTag) {
         currentTags.push(found.name);
       }
       block.properties.rows[rowIndex][colId] = currentTags.join(', ');
@@ -3143,7 +3198,8 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
       col.options = tagOptions;
       
       const currentTags = String(block.properties.rows[rowIndex][colId] || '').split(',').map(t => t.trim()).filter(Boolean);
-      if (!currentTags.includes(found.name)) {
+      const hasTag = currentTags.some(t => t.toLowerCase() === found.name.toLowerCase());
+      if (!hasTag) {
         currentTags.push(found.name);
       }
       block.properties.rows[rowIndex][colId] = currentTags.join(', ');
@@ -3227,7 +3283,7 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
         block.properties.rows.forEach(r => {
           const rowVal = r[colId] || '';
           const currentTags = String(rowVal).split(',').map(t => t.trim()).filter(Boolean);
-          const newTags = currentTags.map(t => t === oldName ? val : t);
+          const newTags = currentTags.map(t => t.toLowerCase() === oldName.toLowerCase() ? val : t);
           r[colId] = newTags.join(', ');
         });
         saveNotesToStorage();
@@ -3262,7 +3318,7 @@ function showSelectTagPopover(e, block, rowIndex, colId, options) {
         block.properties.rows.forEach(r => {
           const rowVal = r[colId] || '';
           const currentTags = String(rowVal).split(',').map(t => t.trim()).filter(Boolean);
-          const newTags = currentTags.filter(t => t !== opt.name && t !== opt.id);
+          const newTags = currentTags.filter(t => t.toLowerCase() !== opt.name.toLowerCase() && t.toLowerCase() !== opt.id.toLowerCase());
           r[colId] = newTags.join(', ');
         });
         
@@ -4611,6 +4667,20 @@ export function updateBulkActionBar(block, rowDataList = null) {
     showBulkPropertySetterPopover(e, block);
   });
   container.appendChild(bulkPropBtn);
+
+  // --- 4. Excel用にコピー ---
+  const copyExcelBtn = document.createElement('button');
+  copyExcelBtn.className = 'btn-bulk-action';
+  copyExcelBtn.style.background = 'rgba(59, 130, 246, 0.18)';
+  copyExcelBtn.style.border = '1px solid rgba(59, 130, 246, 0.4)';
+  copyExcelBtn.style.color = 'var(--text-primary)';
+  copyExcelBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Excel用にコピー';
+  copyExcelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    copyTableToTSV(block, true);
+    clearTableSelection();
+  });
+  container.appendChild(copyExcelBtn);
 }
 
 function showBulkPropertySetterPopover(e, block) {
@@ -7889,7 +7959,7 @@ function renderGalleryViewDOM(block, rowDataList) {
               removeBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 pushHistory();
-                const newTags = tags.filter(t => t !== tagVal);
+                const newTags = tags.filter(t => t.toLowerCase() !== tagVal.toLowerCase());
                 row[col.id] = newTags.join(', ');
                 saveNotesToStorage();
                 renderEditor();
@@ -8019,6 +8089,55 @@ function parseCSV(text) {
     lines.push(row);
   }
   return lines;
+}
+
+// Copy database block rows to clipboard in TSV format for Excel
+function copyTableToTSV(block, selectedRowsOnly = false) {
+  const columns = block.properties.columns || [];
+  const rows = selectedRowsOnly ? tableSelection.selectedRows : (block.properties.rows || []);
+
+  if (rows.length === 0) {
+    showToast('コピーするデータがありません。');
+    return;
+  }
+
+  // 1. ヘッダー行を作成（テーブルの項目をヘッダーとして表示する）
+  const headers = columns.map(col => col.name);
+  const tsvLines = [headers.join('\t')];
+
+  // 2. データ行を作成
+  rows.forEach(row => {
+    const line = columns.map(col => {
+      let val = row[col.id];
+      if (val === undefined || val === null) val = '';
+      
+      if (col.type === 'checkbox') {
+        val = val ? 'TRUE' : 'FALSE';
+      } else if (col.type === 'status') {
+        val = getStatusOptionName(col, val) || '未着手';
+      } else if (col.type === 'select') {
+        val = String(val || '');
+      } else if (col.type === 'date') {
+        val = val ? formatDatePropertyValueForDisplay(val, col) : '';
+      }
+
+      let strVal = String(val);
+      // Excelへの貼り付け時に崩れないよう、タブ・改行・ダブルクォーテーションが含まれる場合はダブルクォーテーションで囲む
+      if (strVal.includes('\t') || strVal.includes('\n') || strVal.includes('\r') || strVal.includes('"')) {
+        strVal = `"${strVal.replace(/"/g, '""')}"`;
+      }
+      return strVal;
+    });
+    tsvLines.push(line.join('\t'));
+  });
+
+  const tsvContent = tsvLines.join('\n');
+  navigator.clipboard.writeText(tsvContent).then(() => {
+    showToast('Excel用にテーブルデータをコピーしました。');
+  }).catch(err => {
+    console.error('コピーに失敗しました', err);
+    showToast('コピーに失敗しました。');
+  });
 }
 
 // Export database block rows to CSV file (UTF-8 BOM)
@@ -8925,7 +9044,7 @@ function renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onU
       removeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         pushHistory();
-        const newTags = tags.filter(t => t !== tagVal);
+        const newTags = tags.filter(t => t.toLowerCase() !== tagVal.toLowerCase());
         row[col.id] = newTags.join(', ');
         saveNotesToStorage();
         renderEditor();
@@ -9018,8 +9137,9 @@ function showSelectTagInline(e, parentWrapper, block, rowIndex, colId, options, 
     // フィルタリングされたオプション
     const filtered = tagOptions.filter(opt => opt.name.toLowerCase().includes(query));
 
+    const tagsLower = tags.map(t => t.toLowerCase());
     filtered.forEach(opt => {
-      const isAct = tags.includes(opt.name);
+      const isAct = tagsLower.includes(opt.name.toLowerCase());
       const item = document.createElement('div');
       item.className = `db-popover-item ${isAct ? 'active' : ''}`;
       item.style.display = 'flex';
@@ -9047,9 +9167,10 @@ function showSelectTagInline(e, parentWrapper, block, rowIndex, colId, options, 
         pushHistory();
         let newTags;
         if (isAct) {
-          newTags = tags.filter(t => t !== opt.name);
+          newTags = tags.filter(t => t.toLowerCase() !== opt.name.toLowerCase());
         } else {
-          newTags = [...tags, opt.name];
+          const exists = tags.some(t => t.toLowerCase() === opt.name.toLowerCase());
+          newTags = exists ? tags : [...tags, opt.name];
         }
         row[colId] = newTags.join(', ');
         saveNotesToStorage();
@@ -9101,7 +9222,7 @@ function showSelectTagInline(e, parentWrapper, block, rowIndex, colId, options, 
           block.properties.rows.forEach(r => {
             const rowVal = r[colId] || '';
             const currentRowTags = String(rowVal).split(',').map(t => t.trim()).filter(Boolean);
-            const newRowTags = currentRowTags.filter(t => t !== opt.name);
+            const newRowTags = currentRowTags.filter(t => t.toLowerCase() !== opt.name.toLowerCase());
             r[colId] = newRowTags.join(', ');
           });
           saveNotesToStorage();
@@ -9132,7 +9253,8 @@ function showSelectTagInline(e, parentWrapper, block, rowIndex, colId, options, 
         col.options.push(newOpt);
         
         pushHistory();
-        let newTags = [...tags, query];
+        const exists = tags.some(t => t.toLowerCase() === query.toLowerCase());
+        let newTags = exists ? tags : [...tags, query];
         row[colId] = newTags.join(', ');
         saveNotesToStorage();
         renderEditor();

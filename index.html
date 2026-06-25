@@ -437,9 +437,14 @@
             <div class="analytics-card table-card">
               <div class="table-header-group">
                 <h4><i class="fa-solid fa-table"></i> 作業時間データベース</h4>
-                <button onclick="clearAllLogs()" class="btn-clear-logs" title="すべての記録を削除">
-                  <i class="fa-solid fa-trash-can"></i>
-                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button onclick="copyFocusTableToExcel()" class="btn-clear-logs" title="Excel用にコピー" style="margin-right: 4px;">
+                    <i class="fa-solid fa-copy"></i>
+                  </button>
+                  <button onclick="clearAllLogs()" class="btn-clear-logs" title="すべての記録を削除">
+                    <i class="fa-solid fa-trash-can"></i>
+                  </button>
+                </div>
               </div>
               <div class="table-scroll-container">
                 <table class="notion-table" id="focus-table">
