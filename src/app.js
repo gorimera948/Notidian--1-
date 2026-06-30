@@ -2773,6 +2773,9 @@ function initApp() {
         ? '<i class="fa-solid fa-chevron-right"></i>' 
         : '<i class="fa-solid fa-chevron-left"></i>';
       leftToggle.title = collapsed ? 'サイドバーを開く' : 'サイドバーを閉じる';
+
+      // サイドバー開閉時にポップオーバーを閉じる
+      document.querySelectorAll('.db-floating-popover').forEach(p => p.remove());
     });
   }
 
@@ -2788,12 +2791,20 @@ function initApp() {
         : '<i class="fa-solid fa-chevron-right"></i>';
       rightToggle.title = collapsed ? 'サイドバーを開く' : 'サイドバーを閉じる';
       
+      // サイドバー開閉時にポップオーバーを閉じる
+      document.querySelectorAll('.db-floating-popover').forEach(p => p.remove());
+
       // マインドマップ等のリサイズイベントを発火してCanvasサイズを追従させる
       setTimeout(() => {
         window.dispatchEvent(new Event('resize'));
       }, 300);
     });
   }
+
+  // ウィンドウリサイズ時にもポップオーバーを閉じる
+  window.addEventListener('resize', () => {
+    document.querySelectorAll('.db-floating-popover').forEach(p => p.remove());
+  });
 
   // --- 左右サイドバーのタブ切り替え機能 ---
   function initSidebarTabs() {

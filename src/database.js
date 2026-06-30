@@ -1111,7 +1111,7 @@ export function createDatabaseDOM(block) {
       flatTableWrapper.style.padding = '0 16px 16px 16px';
       flatTableWrapper.style.overflowX = 'auto';
       flatTableWrapper.style.overflowY = 'auto';
-      flatTableWrapper.style.maxHeight = '450px';
+      flatTableWrapper.style.maxHeight = 'calc(100vh - 200px)';
 
       const flatTable = renderSingleTableDOM(block, visibleRows, (newRowData) => {
         // フィルター条件をすべて自動セット（AND結合の特性）
@@ -1152,11 +1152,6 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
   controlTh.style.width = `${leftColWidth}px`;
   controlTh.style.minWidth = `${leftColWidth}px`;
   controlTh.style.maxWidth = `${leftColWidth}px`;
-  controlTh.style.display = 'flex';
-  controlTh.style.alignItems = 'center';
-  controlTh.style.justifyContent = 'center';
-  controlTh.style.position = 'relative';
-
   // 全選択チェックボックスの生成
   const allCheck = document.createElement('input');
   allCheck.type = 'checkbox';
@@ -2544,6 +2539,35 @@ function showColumnConfigPopover(e, block, col) {
             { id: 'opt-progress', name: '進行中', color: 'blue' },
             { id: 'opt-complete', name: '完了', color: 'green' }
           ];
+        }
+
+        if (newType === 'select') {
+          col.options = col.options || [];
+          const uniqueVals = new Set();
+          block.properties.rows.forEach(row => {
+            const val = row[col.id];
+            if (val !== undefined && val !== null && val !== '') {
+              String(val).split(',').forEach(t => {
+                const trimmed = t.trim();
+                if (trimmed) {
+                  uniqueVals.add(trimmed);
+                }
+              });
+            }
+          });
+          const existingNames = col.options.map(opt => opt.name);
+          const colors = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
+          let colorIdx = col.options.length % colors.length;
+          uniqueVals.forEach(valName => {
+            if (!existingNames.includes(valName)) {
+              col.options.push({
+                id: `opt-${Math.random().toString(36).substr(2, 9)}`,
+                name: valName,
+                color: colors[colorIdx % colors.length]
+              });
+              colorIdx++;
+            }
+          });
         }
 
         col.calc = undefined;
@@ -7579,13 +7603,11 @@ function showGalleryOptionsPopover(e, block, view) {
 
   const popover = document.createElement('div');
   popover.className = 'db-floating-popover db-gallery-options-popover';
-  popover.style.left = `${e.clientX}px`;
-  popover.style.top = `${e.clientY + 12}px`;
   popover.style.width = '200px';
 
   view.galleryShownColIds = view.galleryShownColIds || [];
   const columns = block.properties.columns || [];
-  const addableCols = columns.filter(c => c.id !== 'col-title');
+  const addableCols = columns;
 
   popover.innerHTML = `
     <div style="font-size:10px; color:var(--text-muted); font-weight:700; padding:4px 6px; border-bottom:1px solid var(--border-light);">ギャラリー表示オプション</div>
@@ -7593,7 +7615,7 @@ function showGalleryOptionsPopover(e, block, view) {
       <div style="font-size:9px; color:var(--text-muted); font-weight:700; margin-bottom:2px;">プロパティを表示</div>
       <div id="gallery-properties-list" style="display:flex; flex-direction:column; gap:6px;">
         ${addableCols.map(c => {
-          const isDefaultShown = c.type === 'select' || c.type === 'url';
+          const isDefaultShown = c.type === 'text' || c.type === 'select' || c.type === 'url';
           const isChecked = view.galleryShownColIds.length === 0 ? isDefaultShown : view.galleryShownColIds.includes(c.id);
           
           let typeIcon = 'fa-regular fa-file-lines';
@@ -7638,6 +7660,39 @@ function showGalleryOptionsPopover(e, block, view) {
   });
 
   document.body.appendChild(popover);
+
+  // 表示位置が画面外（枠の外）やサイドバーの下に入り込まないよう、エディタエリア（真ん中のエリア）に収める
+  const rect = popover.getBoundingClientRect();
+  const editorArea = document.querySelector('.editor-area');
+  
+  let minLeft = 12;
+  let maxLeft = window.innerWidth - rect.width - 12;
+  let minTop = 12;
+  let maxTop = window.innerHeight - rect.height - 12;
+
+  if (editorArea) {
+    const editorRect = editorArea.getBoundingClientRect();
+    minLeft = editorRect.left + 12;
+    maxLeft = editorRect.right - rect.width - 12;
+    if (maxLeft < minLeft) {
+      minLeft = 12;
+      maxLeft = window.innerWidth - rect.width - 12;
+    }
+  }
+
+  let left = e.clientX;
+  let top = e.clientY + 12;
+
+  if (left > maxLeft) left = maxLeft;
+  if (left < minLeft) left = minLeft;
+
+  if (top + rect.height > window.innerHeight) {
+    top = e.clientY - rect.height - 12;
+  }
+  if (top < minTop) top = minTop;
+
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
 }
 
 function renderGalleryViewDOM(block, rowDataList) {
@@ -7667,10 +7722,10 @@ function renderGalleryViewDOM(block, rowDataList) {
 
   const columns = block.properties.columns || [];
   
-  // galleryShownColIds が空（未定義または初期状態）なら、セレクトタグとURLタイプの列を表示対象とする
+  // galleryShownColIds が空（未定義または初期状態）なら、テキスト、セレクトタグ、URLタイプの列を表示対象とする
   const shownColIds = (activeView && activeView.galleryShownColIds && activeView.galleryShownColIds.length > 0)
     ? activeView.galleryShownColIds
-    : columns.filter(c => c.id !== 'col-title' && (c.type === 'select' || c.type === 'url')).map(c => c.id);
+    : columns.filter(c => c.id !== 'col-title' && (c.type === 'text' || c.type === 'select' || c.type === 'url')).map(c => c.id);
 
   rowDataList.forEach((row, rowIndex) => {
     const actualIndex = block.properties.rows.indexOf(row);
@@ -7895,21 +7950,32 @@ function renderGalleryViewDOM(block, rowDataList) {
     const infoArea = document.createElement('div');
     infoArea.className = 'db-gallery-card-info';
 
-    // タイトルの描画
-    const titleVal = row['col-title'] || '無題';
-    const titleEl = document.createElement('div');
-    titleEl.className = 'db-gallery-card-title';
-    titleEl.textContent = titleVal;
-    infoArea.appendChild(titleEl);
-
     // 表示に選ばれたプロパティの描画
     const propsArea = document.createElement('div');
     propsArea.className = 'db-gallery-card-properties';
 
-    shownColIds.forEach(colId => {
+    // 表示プロパティをタイプ順（text -> select -> url -> その他）に並べ替える
+    // タイトル列 (col-title) も特別扱いせず、他のプロパティと同様に描画する
+    const typeOrder = { 'text': 1, 'select': 2, 'url': 3 };
+    const sortedColIds = [...shownColIds].sort((aId, bId) => {
+      const colA = columns.find(c => c.id === aId);
+      const colB = columns.find(c => c.id === bId);
+      if (!colA) return 1;
+      if (!colB) return -1;
+      const orderA = typeOrder[colA.type] || 99;
+      const orderB = typeOrder[colB.type] || 99;
+      return orderA - orderB;
+    });
+
+    sortedColIds.forEach(colId => {
       const col = columns.find(c => c.id === colId);
       if (!col) return;
       const val = row[colId];
+
+      // タイトル列 (col-title) の値が空または「無題」の場合は、カード上に表記しない（無題の削除）
+      if (colId === 'col-title') {
+        if (!val || val === '無題') return;
+      }
 
       const propRow = document.createElement('div');
       propRow.className = 'db-gallery-card-property-item';
@@ -7917,97 +7983,86 @@ function renderGalleryViewDOM(block, rowDataList) {
       const label = document.createElement('div');
       propRow.appendChild(label);
       label.className = 'db-gallery-card-property-label';
-      label.textContent = col.name;
+      label.textContent = col.name + ' ';
 
       const valContainer = document.createElement('div');
       valContainer.className = 'db-gallery-card-property-value';
 
-      // タイプ別バッジ・リンク描画
+      // シンプルなプレーンテキストとして値を抽出する
+      let displayVal = '';
       if (val !== undefined && val !== null && val !== '') {
         if (col.type === 'status') {
-          const optName = getStatusOptionName(col, val);
-          const color = getStatusOptionColor(col, val);
-          const badge = document.createElement('span');
-          badge.className = `db-status-badge status-${color}`;
-          badge.textContent = optName;
-          valContainer.appendChild(badge);
+          displayVal = getStatusOptionName(col, val);
         } else if (col.type === 'select') {
-          const tags = String(val || '').split(',').map(t => t.trim()).filter(Boolean);
-          if (tags.length === 0) {
-            const badge = document.createElement('span');
-            badge.className = 'db-select-badge db-tag-gray';
-            badge.style.opacity = '0.5';
-            badge.style.fontStyle = 'italic';
-            badge.textContent = 'なし';
-            badge.style.cursor = 'pointer';
-            badge.addEventListener('click', (e) => {
-              e.stopPropagation();
-              showSelectTagPopover(e, block, actualIndex, col.id, col.options || []);
-            });
-            valContainer.appendChild(badge);
-          } else {
-            tags.forEach(tagVal => {
-              const color = getTagColor(col, tagVal);
-              const badge = document.createElement('span');
-              badge.className = `db-select-badge db-tag-${color}`;
-              badge.textContent = tagVal;
-              badge.style.cursor = 'pointer';
-
-              const removeBtn = document.createElement('span');
-              removeBtn.className = 'btn-remove-tag';
-              removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
-              removeBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                pushHistory();
-                const newTags = tags.filter(t => t.toLowerCase() !== tagVal.toLowerCase());
-                row[col.id] = newTags.join(', ');
-                saveNotesToStorage();
-                renderEditor();
-              });
-              badge.appendChild(removeBtn);
-              
-              badge.addEventListener('click', (e) => {
-                e.stopPropagation();
-                showSelectTagPopover(e, block, actualIndex, col.id, col.options || []);
-              });
-
-              valContainer.appendChild(badge);
-            });
-          }
+          displayVal = String(val);
         } else if (col.type === 'checkbox') {
-          const checkIcon = document.createElement('i');
-          checkIcon.className = val ? 'fa-regular fa-square-check' : 'fa-regular fa-square';
-          checkIcon.style.color = val ? 'var(--accent-primary)' : 'var(--text-muted)';
-          valContainer.appendChild(checkIcon);
-        } else if (col.type === 'url') {
-          const strVal = String(val);
-          const link = document.createElement('a');
-          link.href = (strVal.startsWith('http://') || strVal.startsWith('https://')) ? strVal : `https://${strVal}`;
-          link.target = '_blank';
-          link.className = 'external-link-card';
-          link.textContent = strVal;
-          link.addEventListener('click', (e) => {
-            e.stopPropagation();
-          });
-          valContainer.appendChild(link);
+          displayVal = val ? 'あり' : 'なし';
         } else {
-          const strVal = String(val);
-          if (strVal.startsWith('http://') || strVal.startsWith('https://')) {
-            const link = document.createElement('a');
-            link.href = strVal;
-            link.target = '_blank';
-            link.className = 'external-link-card';
-            link.textContent = strVal;
-            link.addEventListener('click', (e) => {
-              e.stopPropagation();
-            });
-            valContainer.appendChild(link);
-          } else {
-            valContainer.textContent = strVal;
-          }
+          displayVal = String(val);
         }
       } else {
-        valContainer.innerHTML = '<span style="color:var(--text-muted); font-style:italic; font-size:10px;">なし</span>';
+        displayVal = 'なし';
+      }
+
+      // URLタイプ、またはURL形式 of 文字列の場合はリンクとして描画
+      const isUrl = col.type === 'url' || displayVal.startsWith('http://') || displayVal.startsWith('https://');
+      if (isUrl && displayVal !== 'なし') {
+        const link = document.createElement('a');
+        link.href = (displayVal.startsWith('http://') || displayVal.startsWith('https://')) ? displayVal : `https://${displayVal}`;
+        link.target = '_blank';
+        link.style.color = 'var(--accent-primary, #8b5cf6)';
+        link.style.textDecoration = 'none';
+        link.style.overflow = 'hidden';
+        link.style.textOverflow = 'ellipsis';
+        link.style.whiteSpace = 'nowrap';
+        link.style.maxWidth = '100%';
+        link.textContent = displayVal;
+        link.addEventListener('click', (e) => {
+          e.stopPropagation(); // 親の行編集モーダル起動を防止
+        });
+        valContainer.appendChild(link);
+      } else if (col.type === 'select' && displayVal !== 'なし') {
+        const tags = String(val || '').split(',').map(t => t.trim()).filter(Boolean);
+        tags.forEach(tagVal => {
+          const badge = document.createElement('span');
+          badge.className = `db-select-badge db-tag-${getTagColor(col, tagVal)}`;
+          badge.textContent = tagVal;
+          badge.style.marginRight = '4px';
+          badge.style.display = 'inline-block';
+          valContainer.appendChild(badge);
+        });
+      } else if (col.type === 'status' && displayVal !== 'なし') {
+        const optColor = getStatusOptionColor(col, val) || 'gray';
+        const badge = document.createElement('span');
+        badge.className = `db-select-badge db-tag-${optColor}`;
+        badge.textContent = displayVal;
+        badge.style.display = 'inline-block';
+        valContainer.appendChild(badge);
+      } else {
+        if (displayVal.includes('[[') || displayVal.includes('「「')) {
+          valContainer.innerHTML = parseWikiLinks(escapeHTML(displayVal));
+        } else {
+          valContainer.textContent = displayVal;
+        }
+        if (displayVal === 'なし') {
+          valContainer.style.color = 'var(--text-muted)';
+          valContainer.style.fontStyle = 'italic';
+        }
+      }
+
+      // インライン編集を可能にするためのクリックイベントの登録
+      if (col.type === 'select' || col.type === 'status' || col.type === 'date') {
+        valContainer.style.cursor = 'pointer';
+        valContainer.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (col.type === 'select') {
+            showSelectTagPopover(e, block, actualIndex, col.id, col.options || []);
+          } else if (col.type === 'status') {
+            showStatusSelectPopover(e, block, actualIndex, col.id);
+          } else if (col.type === 'date') {
+            showDatabaseDatePickerPopover(e, block, actualIndex, col.id);
+          }
+        });
       }
 
       propRow.appendChild(valContainer);
@@ -8017,8 +8072,12 @@ function renderGalleryViewDOM(block, rowDataList) {
     infoArea.appendChild(propsArea);
     card.appendChild(infoArea);
 
-    card.addEventListener('click', () => {
+    card.addEventListener('click', (e) => {
       if (isRepositioning) return;
+      // 内部リンクや外部リンクをクリックした場合は、カード全体のクリックイベント（詳細モーダル起動）を無視する
+      if (e.target.closest('.wiki-link') || e.target.closest('.external-link') || e.target.closest('.external-link-card')) {
+        return;
+      }
       showDbRowEditModal(block, row, actualIndex);
     });
 
@@ -9025,6 +9084,17 @@ function renderSelectTagsInModal(badgesContainer, row, col, block, rowIndex, onU
   badgesContainer.innerHTML = '';
   const currentVal = row[col.id] || '';
   const tags = String(currentVal || '').split(',').map(t => t.trim()).filter(Boolean);
+
+  // optionsを { id, name, color } のオブジェクト構造に正規化
+  if (col && col.options) {
+    col.options = col.options.map(opt => {
+      if (typeof opt === 'string') {
+        return { id: opt, name: opt, color: getTagHashColor(opt) };
+      }
+      return opt;
+    });
+  }
+
   if (tags.length === 0) {
     const noTagBadge = document.createElement('span');
     noTagBadge.className = 'db-select-badge db-tag-gray';

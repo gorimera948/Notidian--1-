@@ -120,6 +120,27 @@ export function renderEditor() {
   const editorArea = document.querySelector('.editor-area');
   if (!editorArea) return;
 
+  // --- スクロール位置の保存 ---
+  const savedPaneScrolls = [];
+  document.querySelectorAll('.editor-pane').forEach((paneEl, idx) => {
+    savedPaneScrolls[idx] = paneEl.scrollTop;
+  });
+
+  const savedDbScrolls = {};
+  document.querySelectorAll('.block-database-wrapper').forEach(blockWrapper => {
+    const blockId = blockWrapper.getAttribute('data-id');
+    const scrollContainers = blockWrapper.querySelectorAll('.database-container > div, .db-group-subtable');
+    scrollContainers.forEach((container, cIdx) => {
+      if (container.style.overflowY === 'auto' || container.classList.contains('db-group-subtable')) {
+        const key = `${blockId}-${cIdx}`;
+        savedDbScrolls[key] = {
+          top: container.scrollTop,
+          left: container.scrollLeft
+        };
+      }
+    });
+  });
+
   const paneCount = state.isSplit ? 2 : 1;
   editorArea.classList.toggle('split-view', state.isSplit);
 
@@ -451,6 +472,25 @@ export function renderEditor() {
 
     container.appendChild(canvas);
     paneEl.appendChild(container);
+
+    // --- スクロール位置の復元 ---
+    if (savedPaneScrolls[paneIndex] !== undefined) {
+      paneEl.scrollTop = savedPaneScrolls[paneIndex];
+    }
+
+    paneEl.querySelectorAll('.block-database-wrapper').forEach(blockWrapper => {
+      const blockId = blockWrapper.getAttribute('data-id');
+      const scrollContainers = blockWrapper.querySelectorAll('.database-container > div, .db-group-subtable');
+      scrollContainers.forEach((container, cIdx) => {
+        if (container.style.overflowY === 'auto' || container.classList.contains('db-group-subtable')) {
+          const key = `${blockId}-${cIdx}`;
+          if (savedDbScrolls[key]) {
+            container.scrollTop = savedDbScrolls[key].top;
+            container.scrollLeft = savedDbScrolls[key].left;
+          }
+        }
+      });
+    });
   });
 
   setupDragDropListeners();
@@ -588,9 +628,10 @@ export function createBlockDOM(block, parentBlock = null) {
   if (block.type === 'columns') {
     blockWrapper.classList.add('columns-container');
 
-    // カラム全体のコンテナ（columns）にはホバーコントロール（アイコン）を表示せず、
-    // 列内の各ブロック（文字）にのみ表示することで、アイコンの重なりを完全に解消します。
-    // （カラムの解除は右クリックから簡単に行えます）
+    // カラム全体の左外側に一括操作用のコントロール（ドラッグハンドル）を表示します。
+    // カラム内部 of 各ブロックは、レイアウト崩れを防ぐためCSSでコントロールを非表示にしています。
+    const controls = createBlockControls(block.id, block.type);
+    blockWrapper.appendChild(controls);
 
     const columnsWrapper = document.createElement('div');
     columnsWrapper.className = 'columns-container';
@@ -675,13 +716,17 @@ export function createBlockDOM(block, parentBlock = null) {
     const container = document.createElement('div');
     container.className = 'image-block-container';
     
-    // Load saved size properties (30%, 50%, 100%)
-    const size = block.properties?.size || '100';
-    let widthVal = '100%';
-    if (size === '30') widthVal = '30%';
-    else if (size === '50') widthVal = '50%';
+    // 画像サイズ（パーセンテージ）を適用
+    let widthVal = block.properties?.width;
+    if (widthVal === undefined) {
+      // 既存の size プロパティからの移行
+      const size = block.properties?.size || '100';
+      widthVal = size === '30' ? 30 : (size === '50' ? 50 : 100);
+      block.properties = block.properties || {};
+      block.properties.width = widthVal;
+    }
     
-    container.style = `position: relative; width: ${widthVal}; max-width: 600px; margin: 8px 0; border-radius: 8px; overflow: hidden; transition: width 0.2s ease;`;
+    container.style = `position: relative; width: ${widthVal}%; max-width: 100%; margin: 8px 0; border-radius: 8px; overflow: visible; transition: width 0.2s ease;`;
 
     const url = block.properties?.url || '';
 
@@ -739,8 +784,55 @@ export function createBlockDOM(block, parentBlock = null) {
       // Render image with controls
       const img = document.createElement('img');
       img.src = url;
-      img.style = 'width: 100%; display: block; height: auto; border-radius: 6px;';
+      img.style = 'width: 100%; display: block; height: auto; border-radius: 6px; cursor: zoom-in;';
+      img.title = 'クリックして拡大';
+      img.addEventListener('click', () => {
+        showImageLightbox(url);
+      });
       container.appendChild(img);
+
+      // リサイズハンドルの作成
+      const resizer = document.createElement('div');
+      resizer.className = 'image-resizer';
+      
+      // リサイズドラッグ処理
+      resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const startX = e.clientX;
+        const startWidth = container.getBoundingClientRect().width;
+        const parentWidth = blockWrapper.getBoundingClientRect().width;
+
+        const onMouseMove = (moveEvent) => {
+          const deltaX = moveEvent.clientX - startX;
+          let newWidth = startWidth + deltaX;
+          let newWidthPercent = (newWidth / parentWidth) * 100;
+
+          // 10% から 100% の範囲に制限
+          newWidthPercent = Math.max(10, Math.min(100, newWidthPercent));
+          container.style.width = `${newWidthPercent}%`;
+          
+          block.properties = block.properties || {};
+          block.properties.width = Math.round(newWidthPercent);
+        };
+
+        const onMouseUp = () => {
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+          
+          saveNotesToStorage();
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+      });
+      container.appendChild(resizer);
 
       const imgControls = document.createElement('div');
       imgControls.className = 'image-block-controls';
@@ -753,7 +845,7 @@ export function createBlockDOM(block, parentBlock = null) {
       size30Btn.textContent = '30%';
       size30Btn.addEventListener('click', () => {
         block.properties = block.properties || {};
-        block.properties.size = '30';
+        block.properties.width = 30;
         saveNotesToStorage();
         renderEditor();
       });
@@ -765,7 +857,7 @@ export function createBlockDOM(block, parentBlock = null) {
       size50Btn.textContent = '50%';
       size50Btn.addEventListener('click', () => {
         block.properties = block.properties || {};
-        block.properties.size = '50';
+        block.properties.width = 50;
         saveNotesToStorage();
         renderEditor();
       });
@@ -777,7 +869,7 @@ export function createBlockDOM(block, parentBlock = null) {
       size100Btn.textContent = '100%';
       size100Btn.addEventListener('click', () => {
         block.properties = block.properties || {};
-        block.properties.size = '100';
+        block.properties.width = 100;
         saveNotesToStorage();
         renderEditor();
       });
@@ -1117,6 +1209,15 @@ function createEditableContent(block) {
   contentDiv.addEventListener('mousedown', (e) => {
     if (contentDiv.contentEditable === 'true') return;
     if (e.button !== 0) return;
+
+    // リンククリック時は即時編集フォーカスに入らないようにし、リンク遷移を優先する
+    if (e.target.closest('.wiki-link') || e.target.closest('.external-link')) {
+      return;
+    }
+
+    // ドラッグ選択開始時にも即座に編集可能にするため、マウスダウン時にフォーカスを当てる
+    focusBlock(contentDiv);
+
     mouseDownX = e.clientX;
     mouseDownY = e.clientY;
     mouseDownTarget = contentDiv;
@@ -1831,9 +1932,11 @@ function setupDragDropListeners() {
         const contentEl = wrapper.querySelector('.block-content');
         if (contentEl) {
           contentRect = contentEl.getBoundingClientRect();
-          // clientX がトグルの見出しテキストの開始位置より右側にある場合、
-          // トグル自体の左右へのカラム化（トグルの隣に並べる）は制限し、上下ドロップ（内側へのネストなど）として扱う
-          if (e.clientX > contentRect.left - 10) {
+          // トグルの左端（30px以内）または右端（50px以内）へのドラッグ時はカラム化を許可する。
+          // それ以外の中央付近へのドラッグのみ、トグル内へのネスト（inside）を優先するために制限する。
+          const isAtLeftEdge = (e.clientX - rect.left) < 30;
+          const isAtRightEdge = (rect.right - e.clientX) < 50;
+          if (!isAtLeftEdge && !isAtRightEdge) {
             isLeftRightAllowed = false;
           }
         }
@@ -4127,6 +4230,68 @@ export function triggerImportData() {
     reader.readAsText(file);
   });
   input.click();
+}
+
+function showImageLightbox(url) {
+  const overlay = document.createElement('div');
+  overlay.style = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(8, 10, 16, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: zoom-out;
+  `;
+
+  const img = document.createElement('img');
+  img.src = url;
+  img.style = `
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    transform: scale(0.95);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  `;
+
+  overlay.appendChild(img);
+  document.body.appendChild(overlay);
+
+  // Trigger transition
+  requestAnimationFrame(() => {
+    overlay.style.opacity = '1';
+    img.style.transform = 'scale(1)';
+  });
+
+  const closeLightbox = () => {
+    overlay.style.opacity = '0';
+    img.style.transform = 'scale(0.95)';
+    setTimeout(() => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+    }, 250);
+  };
+
+  overlay.addEventListener('click', closeLightbox);
+  
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      closeLightbox();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
 }
 
 
