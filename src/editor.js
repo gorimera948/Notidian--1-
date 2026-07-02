@@ -1840,6 +1840,13 @@ function setupDragDropListeners() {
         wrapper.removeAttribute('draggable');
       }
     });
+    handle.addEventListener('mousedown', (e) => {
+      // 入力カーソルがある状態でのドラッグによるフリーズ（グレー化）を防止するため、フォーカスを外し、選択範囲をクリアする
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+      }
+      window.getSelection().removeAllRanges();
+    });
 
     const content = wrapper.querySelector('.block-content');
     if (content) {
@@ -1959,8 +1966,13 @@ function setupDragDropListeners() {
 
       // 2. 縦方向（行間）の判定（ガタつきをゼロにする）
       if (!resolvedLocation) {
-        // トグルブロック内のネスト（inside）処理
-        const isToggleInside = found && found.block.type === 'toggle' && !isLeftRightAllowed && contentRect;
+        // トグルブロック内のネスト（inside）処理（トグルが開いている時のみ許可）
+        const isToggleInside = found &&
+                               found.block.type === 'toggle' &&
+                               found.block.properties &&
+                               found.block.properties.open &&
+                               !isLeftRightAllowed &&
+                               contentRect;
 
         if (isToggleInside) {
           if (y < rect.height * 0.3) {
@@ -2233,6 +2245,7 @@ function executeBlockDrop(draggedId, targetId, location) {
   // Clean empty columns/toggles again
   cleanupEmptyBlocks(note.blocks);
 
+  pushHistory();
   saveNotesToStorage();
   renderEditor();
 }

@@ -1093,7 +1093,7 @@ select:focus {
   /* Toggle children handled dynamically in JS and display:flex */
   flex-direction: column;
   gap: 4px;
-  padding-left: 24px;
+  padding-left: 16px;
   border-left: 1px dashed var(--border-light);
   margin-top: 2px;
 }
@@ -5180,11 +5180,77 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 
 /* Columns and Block Controls adjustments */
 .column-block .block-wrapper {
-  padding-left: 0 !important;
+  padding-left: 36px !important;
+  position: relative;
 }
 
 .column-block .block-wrapper .block-controls {
   display: none !important;
+  gap: 2px !important;
+  align-items: center;
+}
+
+.column-block .block-wrapper .block-controls .block-select-check {
+  margin: 0 2px 0 0 !important;
+  width: 10px !important;
+  height: 10px !important;
+}
+
+.column-block .block-wrapper .block-controls .btn-add-block {
+  width: 12px !important;
+  height: 16px !important;
+  font-size: 9px !important;
+  margin: 0 1px !important;
+  padding: 0 !important;
+}
+
+.column-block .block-wrapper .block-controls .drag-handle {
+  width: 12px !important;
+  height: 16px !important;
+  font-size: 9px !important;
+  margin: 0 1px !important;
+}
+
+/* Show block controls on the left when hovered inside columns */
+.column-block .block-wrapper:hover > .block-controls {
+  display: flex !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  position: absolute;
+  top: 50% !important;
+  left: 4px !important;
+  transform: translateY(-50%) !important;
+  margin-top: 0 !important;
+  z-index: 100;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: none !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  height: auto;
+  flex-direction: row !important;
+}
+
+/* 左端のコントロールゾーン全体（幅約40px、上下に十分長い範囲）を透明な縦帯で覆い、
+   このライン上でマウスが上下に動いてもホバーが外れずアイコンが出っぱなしになるようにロックします。
+   右側のテキスト領域（X軸でアイコン幅の外）にマウスを動かすとロック解除され、通常通り別行がホバーされます。 */
+.column-block .block-wrapper:hover > .block-controls::before {
+  content: '';
+  position: absolute;
+  top: -400px !important;
+  bottom: -400px !important;
+  left: -12px !important;
+  right: -12px !important;
+  height: auto !important;
+  background: transparent !important;
+  pointer-events: auto !important;
+  z-index: -1 !important;
+}
+
+.column-block .block-wrapper:hover > .block-controls .drag-handle,
+.column-block .block-wrapper:hover > .block-controls .btn-add-block-inline {
+  margin: 0 2px;
 }
 
 /* Image Resizer styling */
@@ -5203,4 +5269,141 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 .image-resizer:hover {
   background-color: var(--accent-primary) !important;
   box-shadow: 0 0 8px var(--accent-primary);
+}
+
+/* Database Floating Row Toolbar */
+tr.db-data-row:hover {
+  position: relative;
+  z-index: 10;
+}
+
+.db-row-controls-cell {
+  position: relative !important;
+  width: 16px !important;
+  min-width: 16px !important;
+  max-width: 16px !important;
+  padding: 0 !important;
+  border-right: 1px solid transparent;
+  z-index: 11 !important;
+}
+
+.db-row-hover-toolbar {
+  position: absolute;
+  top: 100%; /* Positioned right below the cell */
+  left: 0;
+  width: 16px; /* Exactly fits the column width */
+  display: flex;
+  flex-direction: column; /* Vertical layout to stay inside the column */
+  align-items: center;
+  gap: 5px;
+  background: rgba(15, 20, 32, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 5px 0;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px) scale(0.95);
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Show toolbar on row hover */
+tr.db-data-row:hover .db-row-hover-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.db-row-hover-toolbar button,
+.db-row-hover-toolbar .db-row-drag-handle {
+  background: none;
+  border: none;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.db-row-hover-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #ffffff);
+}
+
+.db-row-hover-toolbar .btn-delete-db-row:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.db-row-hover-toolbar .db-row-drag-handle {
+  cursor: grab;
+}
+.db-row-hover-toolbar .db-row-drag-handle:active {
+  cursor: grabbing;
+}
+
+.db-row-hover-toolbar input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0;
+  width: 11px;
+  height: 11px;
+  accent-color: var(--accent-primary);
+}
+
+.db-row-hover-toolbar button,
+.db-row-hover-toolbar .db-row-drag-handle {
+  background: none;
+  border: none;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+  padding: 3px 5px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.db-row-hover-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #ffffff);
+}
+
+.db-row-hover-toolbar .btn-delete-db-row:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.db-row-hover-toolbar .db-row-drag-handle {
+  cursor: grab;
+}
+.db-row-hover-toolbar .db-row-drag-handle:active {
+  cursor: grabbing;
+}
+
+.db-row-hover-toolbar input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0 2px;
+  width: 12px;
+  height: 12px;
+  accent-color: var(--accent-primary);
+}
+
+.db-row-controls-header {
+  width: 16px !important;
+  min-width: 16px !important;
+  max-width: 16px !important;
+  padding: 0 !important;
+  text-align: center;
 }

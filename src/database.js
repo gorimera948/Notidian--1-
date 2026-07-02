@@ -1149,9 +1149,6 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
   const leftColWidth = block.properties.leftColWidth || 48;
   const controlTh = document.createElement('th');
   controlTh.className = 'db-row-controls-header';
-  controlTh.style.width = `${leftColWidth}px`;
-  controlTh.style.minWidth = `${leftColWidth}px`;
-  controlTh.style.maxWidth = `${leftColWidth}px`;
   // 全選択チェックボックスの生成
   const allCheck = document.createElement('input');
   allCheck.type = 'checkbox';
@@ -1341,15 +1338,12 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
         return;
       }
     });
-    // 削除・一括選択コントロールtd（極小コンパクト化）
+    // 削除・一括選択コントロールtd（極小コンパクト化 ➔ フローティング化）
     const controlTd = document.createElement('td');
     controlTd.className = 'db-row-controls-cell';
-    controlTd.style.width = `${leftColWidth}px`;
-    controlTd.style.minWidth = `${leftColWidth}px`;
-    controlTd.style.maxWidth = `${leftColWidth}px`;
 
     const controlsWrapper = document.createElement('div');
-    controlsWrapper.className = 'db-row-controls-inner';
+    controlsWrapper.className = 'db-row-hover-toolbar';
 
     // 一括操作用選択チェックボックス
     const rowCheck = document.createElement('input');
