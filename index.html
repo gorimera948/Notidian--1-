@@ -438,6 +438,9 @@
               <div class="table-header-group">
                 <h4><i class="fa-solid fa-table"></i> 作業時間データベース</h4>
                 <div style="display: flex; gap: 8px; align-items: center;">
+                  <button id="btn-focus-delete-selected" class="btn-clear-logs" title="選択した記録を削除" style="display: none; color: #fca5a5; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35);">
+                    <i class="fa-solid fa-trash-can"></i>
+                  </button>
                   <button onclick="copyFocusTableToExcel()" class="btn-clear-logs" title="Excel用にコピー" style="margin-right: 4px;">
                     <i class="fa-solid fa-copy"></i>
                   </button>
@@ -450,6 +453,7 @@
                 <table class="notion-table" id="focus-table">
                   <thead>
                     <tr>
+                      <th style="width: 30px; text-align: center;"><input type="checkbox" id="focus-select-all" style="cursor: pointer; margin: 0;"></th>
                       <th>日付</th>
                       <th>タスク名</th>
                       <th>時間(分)</th>

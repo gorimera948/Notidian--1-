@@ -1146,7 +1146,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
   const headerTr = document.createElement('tr');
 
   // 削除用・一括選択用制御列のth（全選択チェックボックスの復元・新設）
-  const leftColWidth = block.properties.leftColWidth || 48;
+  const leftColWidth = block.properties.leftColWidth || 60;
   const controlTh = document.createElement('th');
   controlTh.className = 'db-row-controls-header';
   // 全選択チェックボックスの生成
@@ -1321,6 +1321,11 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
     const tr = document.createElement('tr');
     tr.className = 'db-data-row';
+
+    const isSelected = tableSelection.blockId === block.id && tableSelection.selectedRows.includes(row);
+    if (isSelected) {
+      tr.classList.add('selected');
+    }
 
     tr.addEventListener('click', (e) => {
       // 直前の編集確定処理などでクリックされた要素が DOM から取り除かれている（孤立している）場合、

@@ -2027,16 +2027,25 @@ function renderFocusTable() {
   focusTableBody.innerHTML = '';
 
   if (state.focusLogs.length === 0) {
-    focusTableBody.innerHTML = `<tr><td colspan="5" class="no-data-msg">ログがありません。タスクを完了させて記録を作成しましょう！</td></tr>`;
+    focusTableBody.innerHTML = `<tr><td colspan="6" class="no-data-msg">ログがありません。タスクを完了させて記録を作成しましょう！</td></tr>`;
+    const selectAllChk = document.getElementById('focus-select-all');
+    if (selectAllChk) selectAllChk.checked = false;
+    updateFocusDeleteSelectedButton();
     return;
   }
+
+  if (!state.selectedFocusLogIds) state.selectedFocusLogIds = [];
 
   const sortedLogs = [...state.focusLogs].sort((a, b) => b.timestamp - a.timestamp);
 
   sortedLogs.forEach(log => {
     const tr = document.createElement('tr');
     tr.setAttribute('data-id', log.id);
+    const isChecked = state.selectedFocusLogIds.includes(log.id);
     tr.innerHTML = `
+      <td style="text-align: center;">
+        <input type="checkbox" class="focus-row-select-check" data-log-id="${log.id}" ${isChecked ? 'checked' : ''} style="cursor: pointer; margin: 0;">
+      </td>
       <td>${escapeHTML(log.date)}</td>
       <td class="cell-editable" contenteditable="true" data-field="taskName">${escapeHTML(log.taskName)}</td>
       <td class="cell-editable" contenteditable="true" data-field="duration" style="text-align:center;">${log.duration}分</td>
@@ -2051,6 +2060,21 @@ function renderFocusTable() {
         </button>
       </td>
     `;
+
+    // Checkbox handler
+    const chk = tr.querySelector('.focus-row-select-check');
+    chk.addEventListener('change', (e) => {
+      const id = e.target.getAttribute('data-log-id');
+      if (e.target.checked) {
+        if (!state.selectedFocusLogIds.includes(id)) {
+          state.selectedFocusLogIds.push(id);
+        }
+      } else {
+        state.selectedFocusLogIds = state.selectedFocusLogIds.filter(item => item !== id);
+      }
+      updateFocusSelectAllState();
+      updateFocusDeleteSelectedButton();
+    });
 
     // Delete handler
     tr.querySelector('.btn-clear-logs').addEventListener('click', (e) => {
@@ -2093,6 +2117,29 @@ function renderFocusTable() {
 
     focusTableBody.appendChild(tr);
   });
+
+  updateFocusSelectAllState();
+  updateFocusDeleteSelectedButton();
+}
+
+export function updateFocusSelectAllState() {
+  const selectAllChk = document.getElementById('focus-select-all');
+  if (!selectAllChk) return;
+  const visibleLogIds = state.focusLogs.map(l => l.id);
+  const isAllSelected = visibleLogIds.length > 0 && visibleLogIds.every(id => state.selectedFocusLogIds && state.selectedFocusLogIds.includes(id));
+  selectAllChk.checked = isAllSelected;
+}
+
+export function updateFocusDeleteSelectedButton() {
+  const delSelectedBtn = document.getElementById('btn-focus-delete-selected');
+  if (!delSelectedBtn) return;
+  const count = state.selectedFocusLogIds ? state.selectedFocusLogIds.length : 0;
+  if (count > 0) {
+    delSelectedBtn.style.display = 'inline-flex';
+    delSelectedBtn.title = `選択した記録を削除 (${count}件)`;
+  } else {
+    delSelectedBtn.style.display = 'none';
+  }
 }
 
 function deleteLog(logId) {
@@ -2284,6 +2331,40 @@ if (btnClearAllLogs) {
     }
   });
   btnClearAllLogs.replaceWith(newBtn);
+}
+
+// Setup Focus Table select-all and delete-selected events
+const focusSelectAll = document.getElementById('focus-select-all');
+if (focusSelectAll) {
+  focusSelectAll.addEventListener('change', (e) => {
+    const checked = e.target.checked;
+    if (!state.selectedFocusLogIds) state.selectedFocusLogIds = [];
+    if (checked) {
+      state.selectedFocusLogIds = state.focusLogs.map(l => l.id);
+    } else {
+      state.selectedFocusLogIds = [];
+    }
+    // テーブル内のチェックボックスと同期
+    document.querySelectorAll('.focus-row-select-check').forEach(chk => {
+      chk.checked = checked;
+    });
+    updateFocusDeleteSelectedButton();
+  });
+}
+
+const btnFocusDeleteSelected = document.getElementById('btn-focus-delete-selected');
+if (btnFocusDeleteSelected) {
+  btnFocusDeleteSelected.addEventListener('click', () => {
+    const count = state.selectedFocusLogIds ? state.selectedFocusLogIds.length : 0;
+    if (count === 0) return;
+    if (confirm(`選択した ${count} 件の記録を削除しますか？`)) {
+      state.focusLogs = state.focusLogs.filter(l => !state.selectedFocusLogIds.includes(l.id));
+      state.selectedFocusLogIds = [];
+      saveLogsToStorage();
+      if (focusSelectAll) focusSelectAll.checked = false;
+      updateFocusDeleteSelectedButton();
+    }
+  });
 }
 
 // ==========================================

@@ -2072,6 +2072,10 @@ svg#cumulative-chart {
   background: rgba(255, 255, 255, 0.01);
 }
 
+tr.db-data-row.selected td {
+  background-color: rgba(59, 130, 246, 0.12) !important;
+}
+
 /* Editable cells styling */
 .db-cell-edit {
   outline: none;
@@ -2945,6 +2949,10 @@ svg#cumulative-chart {
   height: 11px;
   margin: 0;
   flex-shrink: 0;
+  background: initial !important;
+  border: initial !important;
+  appearance: checkbox !important;
+  -webkit-appearance: checkbox !important;
 }
 
 /* Bulk Action Bar Acrylic UI */
@@ -3791,8 +3799,8 @@ svg#cumulative-chart {
 /* ==========================================
    DATABASE CELLS NO-WRAP & HEIGHT PROTECTION
    ========================================== */
-.notion-db-table td:not(.cell-type-date) .db-cell-edit,
-.notion-db-table td:not(.cell-type-date) {
+.notion-db-table td:not(.cell-type-date):not(.db-row-controls-cell) .db-cell-edit,
+.notion-db-table td:not(.cell-type-date):not(.db-row-controls-cell) {
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
@@ -5180,7 +5188,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 
 /* Columns and Block Controls adjustments */
 .column-block .block-wrapper {
-  padding-left: 36px !important;
+  padding-left: 52px !important;
   position: relative;
 }
 
@@ -5241,7 +5249,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   top: -400px !important;
   bottom: -400px !important;
   left: -12px !important;
-  right: -12px !important;
+  right: -4px !important; /* チェックボックス(padding-left: 52pxから開始)へのクリックを遮らないよう、コントロールの右側4pxまでに制限しホバーを維持します */
   height: auto !important;
   background: transparent !important;
   pointer-events: auto !important;
@@ -5279,42 +5287,40 @@ tr.db-data-row:hover {
 
 .db-row-controls-cell {
   position: relative !important;
-  width: 16px !important;
-  min-width: 16px !important;
-  max-width: 16px !important;
+  width: 60px !important;
+  min-width: 60px !important;
+  max-width: 60px !important;
   padding: 0 !important;
   border-right: 1px solid transparent;
   z-index: 11 !important;
+  overflow: visible !important;
 }
 
 .db-row-hover-toolbar {
   position: absolute;
-  top: 100%; /* Positioned right below the cell */
+  top: 0;
   left: 0;
-  width: 16px; /* Exactly fits the column width */
+  width: 100%;
+  height: 100%;
   display: flex;
-  flex-direction: column; /* Vertical layout to stay inside the column */
+  flex-direction: row; /* 横並びレイアウト */
   align-items: center;
-  gap: 5px;
-  background: rgba(15, 20, 32, 0.96);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 5px 0;
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  justify-content: center;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
   z-index: 999;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-4px) scale(0.95);
-  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0.4; /* 非ホバー時でもはっきりと視認できる適度な透明度 */
+  pointer-events: auto;
+  transform: none;
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Show toolbar on row hover */
 tr.db-data-row:hover .db-row-hover-toolbar {
   opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0) scale(1);
 }
 
 .db-row-hover-toolbar button,
@@ -5357,6 +5363,10 @@ tr.db-data-row:hover .db-row-hover-toolbar {
   width: 11px;
   height: 11px;
   accent-color: var(--accent-primary);
+  background: initial !important;
+  border: initial !important;
+  appearance: checkbox !important;
+  -webkit-appearance: checkbox !important;
 }
 
 .db-row-hover-toolbar button,
@@ -5398,12 +5408,16 @@ tr.db-data-row:hover .db-row-hover-toolbar {
   width: 12px;
   height: 12px;
   accent-color: var(--accent-primary);
+  background: initial !important;
+  border: initial !important;
+  appearance: checkbox !important;
+  -webkit-appearance: checkbox !important;
 }
 
 .db-row-controls-header {
-  width: 16px !important;
-  min-width: 16px !important;
-  max-width: 16px !important;
+  width: 60px !important;
+  min-width: 60px !important;
+  max-width: 60px !important;
   padding: 0 !important;
   text-align: center;
 }

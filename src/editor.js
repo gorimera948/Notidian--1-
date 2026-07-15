@@ -2638,6 +2638,37 @@ export function setupBlockCopyPasteShortcuts() {
     const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
     const isDelete = e.key === 'Backspace' || e.key === 'Delete';
 
+    if (window.tableSelection && window.tableSelection.selectedRows && window.tableSelection.selectedRows.length > 0) {
+      if (isDelete) {
+        const active = document.activeElement;
+        const isEditable = active && (
+          active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.isContentEditable ||
+          active.getAttribute('contenteditable') === 'true' ||
+          active.closest('[contenteditable="true"]')
+        );
+        if (!isEditable) {
+          e.preventDefault();
+          const blockId = window.tableSelection.blockId;
+          const activeNote = getActiveNote();
+          if (activeNote && blockId) {
+            const found = findBlockAndParent(activeNote.blocks, blockId);
+            if (found && found.block && found.block.type === 'database') {
+              pushHistory();
+              const block = found.block;
+              block.properties.rows = block.properties.rows.filter(r => !window.tableSelection.selectedRows.includes(r));
+              saveNotesToStorage();
+              if (typeof window.clearTableSelection === 'function') window.clearTableSelection();
+              renderEditor();
+              showToast(`選択した行を削除しました`);
+            }
+          }
+          return;
+        }
+      }
+    }
+
     if (state.selectedBlockIds && state.selectedBlockIds.length > 0) {
       const activeNote = getActiveNote();
       if (!activeNote) return;
@@ -4181,68 +4212,357 @@ export function exportAllData() {
   URL.revokeObjectURL(url);
 }
 
+function cleanJSONText(text) {
+  if (!text) return '';
+  
+  // スマホの自動修正による全角記号を半角に変換
+  let cleaned = text
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/：/g, ':')
+    .replace(/，/g, ',')
+    .replace(/｛/g, '{')
+    .replace(/｝/g, '}')
+    .replace(/［/g, '[')
+    .replace(/］/g, ']')
+    .replace(/　/g, ' ');
+
+  // コピペ時に前後に余計なテキスト（説明文など）が混入した場合、最初の{または[から最後の}または]までを切り出す
+  const startBrace = cleaned.indexOf('{');
+  const startBracket = cleaned.indexOf('[');
+  let start = -1;
+  if (startBrace !== -1 && startBracket !== -1) {
+    start = Math.min(startBrace, startBracket);
+  } else {
+    start = startBrace !== -1 ? startBrace : startBracket;
+  }
+  
+  let end = -1;
+  if (start !== -1) {
+    const endBrace = cleaned.lastIndexOf('}');
+    const endBracket = cleaned.lastIndexOf(']');
+    end = Math.max(endBrace, endBracket);
+  }
+  
+  if (start !== -1 && end !== -1 && end > start) {
+    cleaned = cleaned.substring(start, end + 1);
+  } else {
+    cleaned = cleaned.trim();
+  }
+  
+  return cleaned;
+}
+
+function processImportedJSON(jsonText) {
+  try {
+    const cleanedText = cleanJSONText(jsonText);
+    const data = JSON.parse(cleanedText);
+    if (!data || !Array.isArray(data.notes)) {
+      alert('不正なバックアップファイルです。有効な Notidian バックアップ JSON を選択してください。');
+      return false;
+    }
+
+    if (confirm('データをインポートすると、現在のすべてのノートや設定が上書きされます。よろしいですか？')) {
+      if (data.notes) {
+        localStorage.setItem('notidian_notes', JSON.stringify(data.notes));
+        state.notes = data.notes;
+      }
+      if (data.folders) {
+        localStorage.setItem('notidian_folders', JSON.stringify(data.folders));
+        state.folders = data.folders;
+      }
+      if (data.collapsedFolders) {
+        localStorage.setItem('notidian_collapsed_folders', JSON.stringify(data.collapsedFolders));
+        state.collapsedFolders = data.collapsedFolders;
+      }
+      if (data.dailyFolderId !== undefined) {
+        localStorage.setItem('notidian_daily_folder_id', data.dailyFolderId);
+        state.dailyFolderId = data.dailyFolderId;
+      }
+      if (data.focusLogs) {
+        localStorage.setItem('notidian_focus_logs', JSON.stringify(data.focusLogs));
+        state.focusLogs = data.focusLogs;
+      }
+      if (data.customTagColors) {
+        localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(data.customTagColors));
+        state.customTagColors = data.customTagColors;
+      }
+
+      if (state.notes.length > 0) {
+        state.activeNoteId = state.notes[0].id;
+        state.panes = [
+          { activeNoteId: state.activeNoteId, noteHistory: [state.activeNoteId], historyIndex: 0 },
+          { activeNoteId: null, noteHistory: [], historyIndex: -1 }
+        ];
+        localStorage.setItem('notidian_active_note_id', state.activeNoteId);
+      }
+
+      alert('データのインポートが完了しました。');
+      window.location.reload();
+      return true;
+    }
+  } catch (err) {
+    alert('ファイルの読み込み・解析に失敗しました: ' + err.message);
+  }
+  return false;
+}
+
 export function triggerImportData() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.addEventListener('change', (e) => {
+  const overlay = document.createElement('div');
+  overlay.style = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(8, 10, 16, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-y: auto;
+    padding: 20px 12px;
+    box-sizing: border-box;
+  `;
+
+  const modal = document.createElement('div');
+  modal.style = `
+    width: 100%;
+    max-width: 480px;
+    margin: auto;
+    background: #0f1322;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    box-shadow: var(--shadow-glow), var(--shadow-card);
+    padding: 20px;
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    transform: scale(0.95);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+  `;
+
+  const title = document.createElement('h3');
+  title.style = `
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+  `;
+  title.innerHTML = '<i class="fa-solid fa-file-import" style="color: var(--accent-primary);"></i> データのインポート';
+
+  const desc = document.createElement('p');
+  desc.innerText = 'JSONファイルの選択、またはテキストデータの直接貼り付けにより、バックアップデータをインポートします。';
+  desc.style = `
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0;
+    box-sizing: border-box;
+  `;
+
+  // Option 1: File Upload (Direct input to prevent iOS sandboxing limitations)
+  const fileSection = document.createElement('div');
+  fileSection.style = `
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-sizing: border-box;
+  `;
+
+  const fileLabel = document.createElement('label');
+  fileLabel.innerText = '方法1: バックアップファイルを選択';
+  fileLabel.style = `
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--accent-primary);
+  `;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.style = `
+    padding: 8px;
+    display: block;
+    cursor: pointer;
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-radius: 8px;
+    box-sizing: border-box;
+    width: 100%;
+  `;
+
+  fileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (evt) => {
-      try {
-        const data = JSON.parse(evt.target.result);
-        if (!data || !Array.isArray(data.notes)) {
-          alert('不正なバックアップファイルです。有効な Notidian バックアップ JSON を選択してください。');
-          return;
-        }
-
-        if (confirm('データをインポートすると、現在のすべてのノートや設定が上書きされます。よろしいですか？')) {
-          if (data.notes) {
-            localStorage.setItem('notidian_notes', JSON.stringify(data.notes));
-            state.notes = data.notes;
-          }
-          if (data.folders) {
-            localStorage.setItem('notidian_folders', JSON.stringify(data.folders));
-            state.folders = data.folders;
-          }
-          if (data.collapsedFolders) {
-            localStorage.setItem('notidian_collapsed_folders', JSON.stringify(data.collapsedFolders));
-            state.collapsedFolders = data.collapsedFolders;
-          }
-          if (data.dailyFolderId !== undefined) {
-            localStorage.setItem('notidian_daily_folder_id', data.dailyFolderId);
-            state.dailyFolderId = data.dailyFolderId;
-          }
-          if (data.focusLogs) {
-            localStorage.setItem('notidian_focus_logs', JSON.stringify(data.focusLogs));
-            state.focusLogs = data.focusLogs;
-          }
-          if (data.customTagColors) {
-            localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(data.customTagColors));
-            state.customTagColors = data.customTagColors;
-          }
-
-          if (state.notes.length > 0) {
-            state.activeNoteId = state.notes[0].id;
-            state.panes = [
-              { activeNoteId: state.activeNoteId, noteHistory: [state.activeNoteId], historyIndex: 0 },
-              { activeNoteId: null, noteHistory: [], historyIndex: -1 }
-            ];
-            localStorage.setItem('notidian_active_note_id', state.activeNoteId);
-          }
-
-          alert('データのインポートが完了しました。');
-          window.location.reload();
-        }
-      } catch (err) {
-        alert('ファイルの読み込みに失敗しました: ' + err.message);
+      if (processImportedJSON(evt.target.result)) {
+        closeModal();
       }
     };
     reader.readAsText(file);
   });
-  input.click();
+
+  fileSection.appendChild(fileLabel);
+  fileSection.appendChild(fileInput);
+
+  // Option 2: Direct Paste
+  const pasteSection = document.createElement('div');
+  pasteSection.style = `
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-sizing: border-box;
+  `;
+
+  const pasteLabel = document.createElement('label');
+  pasteLabel.innerText = '方法2: JSONデータを直接貼り付ける';
+  pasteLabel.style = `
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--accent-primary);
+  `;
+
+  const textarea = document.createElement('textarea');
+  textarea.placeholder = 'ここに JSON データ（{"notes": [...]} など）を貼り付けてください...';
+  textarea.setAttribute('autocapitalize', 'off');
+  textarea.setAttribute('autocorrect', 'off');
+  textarea.setAttribute('spellcheck', 'false');
+  textarea.style = `
+    width: 100%;
+    height: 100px;
+    background: #080a10;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 10px;
+    color: #e2e8f0;
+    font-family: var(--font-code);
+    font-size: 11px;
+    resize: none;
+    outline: none;
+    transition: var(--transition-smooth);
+    box-sizing: border-box;
+  `;
+  textarea.addEventListener('focus', () => {
+    textarea.style.borderColor = 'var(--accent-primary)';
+    textarea.style.boxShadow = '0 0 10px rgba(139, 92, 246, 0.15)';
+  });
+  textarea.addEventListener('blur', () => {
+    textarea.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+    textarea.style.boxShadow = 'none';
+  });
+
+  const pasteBtn = document.createElement('button');
+  pasteBtn.className = 'btn-primary';
+  pasteBtn.style = `
+    padding: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    background: var(--accent-primary);
+    border: none;
+    color: white;
+    font-weight: 500;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: var(--transition-smooth);
+    box-sizing: border-box;
+    width: 100%;
+  `;
+  pasteBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> 貼り付けたデータからインポート';
+  pasteBtn.addEventListener('click', () => {
+    const val = textarea.value.trim();
+    if (!val) {
+      alert('データが入力されていません。');
+      return;
+    }
+    if (processImportedJSON(val)) {
+      closeModal();
+    }
+  });
+
+  pasteSection.appendChild(pasteLabel);
+  pasteSection.appendChild(textarea);
+  pasteSection.appendChild(pasteBtn);
+
+  // Footer / Cancel
+  const footer = document.createElement('div');
+  footer.style = `
+    display: flex;
+    justify-content: flex-end;
+    border-top: 1px solid var(--border-light);
+    padding-top: 12px;
+  `;
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn-secondary';
+  cancelBtn.innerText = 'キャンセル';
+  cancelBtn.style = `
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    transition: var(--transition-smooth);
+  `;
+  cancelBtn.addEventListener('click', () => closeModal());
+  footer.appendChild(cancelBtn);
+
+  modal.appendChild(title);
+  modal.appendChild(desc);
+  modal.appendChild(fileSection);
+  modal.appendChild(pasteSection);
+  modal.appendChild(footer);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  requestAnimationFrame(() => {
+    overlay.style.opacity = '1';
+    modal.style.transform = 'scale(1)';
+  });
+
+  const closeModal = () => {
+    overlay.style.opacity = '0';
+    modal.style.transform = 'scale(0.95)';
+    setTimeout(() => {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+      }
+    }, 250);
+  };
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      closeModal();
+    }
+  });
+
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
 }
 
 function showImageLightbox(url) {
