@@ -1074,6 +1074,12 @@ export function createDatabaseDOM(block) {
         }
       });
 
+      const tbodyEl = subTable.querySelector('tbody');
+      if (tbodyEl) {
+        tbodyEl.setAttribute('data-group-col-id', statusCol.id);
+        tbodyEl.setAttribute('data-group-val', opt.id);
+      }
+
       subTableWrapper.appendChild(subTable);
       groupContainer.appendChild(subTableWrapper);
       groupsWrapper.appendChild(groupContainer);
@@ -1140,6 +1146,11 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
   table.className = 'notion-db-table';
 
   const columns = block.properties.columns || [];
+
+  const views = block.properties.views || [];
+  const activeViewId = block.properties.activeViewId || (views[0] ? views[0].id : null);
+  const activeView = views.find(v => v.id === activeViewId) || views[0];
+  const hasSorts = activeView && activeView.sorts && activeView.sorts.length > 0;
 
   // 1. HEAD (thead)
   const thead = document.createElement('thead');
@@ -1321,6 +1332,7 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
     const tr = document.createElement('tr');
     tr.className = 'db-data-row';
+    tr._rowData = row; // ドロップ先でドラッグされた行データを特定するために参照を保持
 
     const isSelected = tableSelection.blockId === block.id && tableSelection.selectedRows.includes(row);
     if (isSelected) {
@@ -1364,8 +1376,8 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
     // ドラッグ＆ドロップ用グリップハンドルを追加
     const dragHandle = document.createElement('div');
-    dragHandle.className = 'db-row-drag-handle';
-    dragHandle.title = 'ドラッグして行を並べ替え';
+    dragHandle.className = `db-row-drag-handle ${hasSorts ? 'disabled' : ''}`;
+    dragHandle.title = hasSorts ? '並べ替え適用中はドラッグできません' : 'ドラッグして行を並べ替え';
     dragHandle.innerHTML = '<i class="fa-solid fa-grip-vertical"></i>';
     controlsWrapper.appendChild(dragHandle);
 
@@ -1819,7 +1831,16 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
     draggable: '.db-data-row',
     ghostClass: 'sortable-ghost',
     chosenClass: 'sortable-chosen',
+    disabled: hasSorts,
+    group: {
+      name: `db-rows-${block.id}`,
+      pull: true,
+      put: true
+    },
     onEnd: (evt) => {
+      // 異なるグループ（リスト）への移動は onAdd が担当するため無視する
+      if (evt.to !== evt.from) return;
+
       if (evt.oldIndex === evt.newIndex) return;
 
       const draggedRowData = rowDataList[evt.oldIndex];
@@ -1840,7 +1861,14 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
       let targetIdx;
       if (evt.newIndex >= tempRowList.length) {
-        targetIdx = block.properties.rows.length;
+        if (tempRowList.length === 0) {
+          targetIdx = block.properties.rows.length;
+        } else {
+          // 表示されている最後の行のインデックスを取得し、その直後に挿入する
+          const lastRowData = tempRowList[tempRowList.length - 1];
+          const lastIdxInMain = block.properties.rows.indexOf(lastRowData);
+          targetIdx = lastIdxInMain + 1;
+        }
       } else {
         const nextRowData = tempRowList[evt.newIndex];
         targetIdx = block.properties.rows.indexOf(nextRowData);
@@ -1855,6 +1883,54 @@ function renderSingleTableDOM(block, rowDataList, onAddRowCallback = null) {
 
       saveNotesToStorage();
       renderEditor();
+    },
+    onAdd: (evt) => {
+      const draggedRowData = evt.item._rowData;
+      if (!draggedRowData) return;
+
+      const targetGroupColId = tbody.getAttribute('data-group-col-id');
+      const targetGroupVal = tbody.getAttribute('data-group-val');
+
+      if (targetGroupColId && targetGroupVal) {
+        // 履歴スタックに現在の状態をプッシュ（Ctrl+Z対応）
+        pushHistory();
+
+        // 1. ドラッグされた行のステータス（グループ値）を更新
+        draggedRowData[targetGroupColId] = targetGroupVal;
+
+        // 2. block.properties.rows 内での位置を更新
+        const actualOldIdx = block.properties.rows.indexOf(draggedRowData);
+        if (actualOldIdx !== -1) {
+          block.properties.rows.splice(actualOldIdx, 1);
+        }
+
+        // ドロップされた位置に対応する rows 内のインデックスを決定
+        const targetChildren = Array.from(evt.to.children).filter(child => child.classList.contains('db-data-row'));
+        const nextEl = targetChildren[evt.newIndex]; // ドロップ位置にある要素（移動してきた要素自身の位置でもあるが、Sortable.jsによるDOM変更後のインデックス）
+        let targetIdx = -1;
+
+        if (nextEl && nextEl !== evt.item && nextEl._rowData) {
+          targetIdx = block.properties.rows.indexOf(nextEl._rowData);
+        }
+
+        if (targetIdx === -1) {
+          // nextEl が移動したアイテム自身、もしくは末尾の場合は直前の要素を探す
+          const prevEl = targetChildren[evt.newIndex - 1];
+          if (prevEl && prevEl !== evt.item && prevEl._rowData) {
+            const prevIdxInMain = block.properties.rows.indexOf(prevEl._rowData);
+            targetIdx = prevIdxInMain + 1;
+          }
+        }
+
+        if (targetIdx === -1) {
+          targetIdx = block.properties.rows.length;
+        }
+
+        block.properties.rows.splice(targetIdx, 0, draggedRowData);
+
+        saveNotesToStorage();
+        renderEditor();
+      }
     }
   });
 

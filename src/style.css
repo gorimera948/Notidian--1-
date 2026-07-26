@@ -1748,6 +1748,23 @@ svg#cumulative-chart {
   box-shadow: inset 0 0 4px rgba(139, 92, 246, 0.2);
 }
 
+.focus-th-sortable {
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+.focus-th-sortable:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+.focus-th-sortable.sorted {
+  color: var(--accent-primary) !important;
+}
+.focus-th-sortable .sort-icon {
+  font-size: 10px;
+  margin-left: 4px;
+  color: var(--accent-primary);
+}
+
 .no-data-msg {
   font-size: 11px;
   color: var(--text-muted);
@@ -2745,6 +2762,12 @@ tr.db-data-row.selected td {
 
 .db-row-drag-handle:hover {
   color: var(--accent-primary);
+}
+
+.db-row-drag-handle.disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+  pointer-events: none;
 }
 
 /* Sortable tr styles */
@@ -5420,4 +5443,16 @@ tr.db-data-row:hover .db-row-hover-toolbar {
   max-width: 60px !important;
   padding: 0 !important;
   text-align: center;
+}
+
+/* Touch device support for database row drag handles */
+@media (pointer: coarse) {
+  .db-row-hover-toolbar {
+    opacity: 0.8;
+  }
+  .db-row-hover-toolbar .db-row-drag-handle {
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+  }
 }

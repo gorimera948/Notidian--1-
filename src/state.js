@@ -31,6 +31,7 @@ export const state = {
   lastSelectedBlockId: null,
   isComposing: false,
   customTagColors: {},
+  focusLogSort: { column: 'date', direction: 'desc' },
 
   // スプリットペイン関連
   isSplit: false,
@@ -247,6 +248,7 @@ export function saveCustomTagColorsToStorage() {
 
 export function saveLogsToStorage() {
   localStorage.setItem('notidian_focus_logs', JSON.stringify(state.focusLogs));
+  localStorage.setItem('notidian_focus_log_sort', JSON.stringify(state.focusLogSort || { column: 'date', direction: 'desc' }));
   if (window.Notidian && typeof window.Notidian.renderAnalytics === 'function') {
     window.Notidian.renderAnalytics();
   }
@@ -343,6 +345,15 @@ export function initStorage() {
   } catch (e) {
     console.error("Failed to parse focus logs:", e);
     state.focusLogs = [];
+  }
+
+  // Load Focus Log Sort
+  try {
+    const savedSort = localStorage.getItem('notidian_focus_log_sort');
+    state.focusLogSort = savedSort ? JSON.parse(savedSort) : { column: 'date', direction: 'desc' };
+  } catch (e) {
+    console.error("Failed to parse focus log sort:", e);
+    state.focusLogSort = { column: 'date', direction: 'desc' };
   }
 
   if (!state.focusLogs || !Array.isArray(state.focusLogs)) {

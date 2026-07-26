@@ -1863,6 +1863,12 @@ function setupDragDropListeners() {
     }
 
     wrapper.addEventListener('dragstart', (e) => {
+      // データベース関連のドラッグターゲットの場合は、このイベントハンドラでの処理をスルーする。
+      const isDbDrag = e.target.closest('.notion-db-table, .db-view-tab');
+      if (isDbDrag) {
+        return;
+      }
+
       // ドラッグアイコン（.drag-handle）をドラッグしたときのみブロック移動を許可し、テキストのドラッグ選択からブロック移動が起きるのを防ぐ。
       const isDragHandle = e.target.closest('.drag-handle');
       if (!isDragHandle) {
@@ -1902,6 +1908,10 @@ function setupDragDropListeners() {
     });
 
     wrapper.addEventListener('dragover', (e) => {
+      const isDbDrag = e.target.closest('.notion-db-table, .db-view-tab');
+      if (isDbDrag) {
+        return;
+      }
       if (!state.draggedBlockId) {
         hideDropIndicators();
         return;
@@ -2018,6 +2028,10 @@ function setupDragDropListeners() {
     });
 
     wrapper.addEventListener('drop', (e) => {
+      const isDbDrag = e.target.closest('.notion-db-table, .db-view-tab');
+      if (isDbDrag) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       hideDropIndicators();
@@ -2033,6 +2047,10 @@ function setupDragDropListeners() {
   const columnBlocks = document.querySelectorAll('.column-block');
   columnBlocks.forEach(colBlock => {
     colBlock.addEventListener('dragover', (e) => {
+      const isDbDrag = e.target.closest('.notion-db-table, .db-view-tab');
+      if (isDbDrag) {
+        return;
+      }
       if (!state.draggedBlockId) {
         hideDropIndicators();
         return;
@@ -2068,6 +2086,10 @@ function setupDragDropListeners() {
     });
 
     colBlock.addEventListener('drop', (e) => {
+      const isDbDrag = e.target.closest('.notion-db-table, .db-view-tab');
+      if (isDbDrag) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       hideDropIndicators();

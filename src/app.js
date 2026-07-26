@@ -2036,7 +2036,30 @@ function renderFocusTable() {
 
   if (!state.selectedFocusLogIds) state.selectedFocusLogIds = [];
 
-  const sortedLogs = [...state.focusLogs].sort((a, b) => b.timestamp - a.timestamp);
+  const sort = state.focusLogSort || { column: 'date', direction: 'desc' };
+  const sortedLogs = [...state.focusLogs].sort((a, b) => {
+    let valA, valB;
+    if (sort.column === 'date') {
+      valA = a.timestamp || 0;
+      valB = b.timestamp || 0;
+    } else if (sort.column === 'taskName') {
+      valA = String(a.taskName || '').toLowerCase();
+      valB = String(b.taskName || '').toLowerCase();
+    } else if (sort.column === 'duration') {
+      valA = Number(a.duration || 0);
+      valB = Number(b.duration || 0);
+    } else if (sort.column === 'status') {
+      valA = String(a.status || '').toLowerCase();
+      valB = String(b.status || '').toLowerCase();
+    } else {
+      valA = a.timestamp || 0;
+      valB = b.timestamp || 0;
+    }
+
+    if (valA === valB) return 0;
+    if (valA < valB) return sort.direction === 'asc' ? -1 : 1;
+    return sort.direction === 'asc' ? 1 : -1;
+  });
 
   sortedLogs.forEach(log => {
     const tr = document.createElement('tr');
@@ -2120,6 +2143,7 @@ function renderFocusTable() {
 
   updateFocusSelectAllState();
   updateFocusDeleteSelectedButton();
+  updateFocusTableSortIcons();
 }
 
 export function updateFocusSelectAllState() {
@@ -2140,6 +2164,39 @@ export function updateFocusDeleteSelectedButton() {
   } else {
     delSelectedBtn.style.display = 'none';
   }
+}
+
+export function initFocusTableSort() {
+  const headers = document.querySelectorAll('.focus-th-sortable');
+  headers.forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.getAttribute('data-col');
+      let dir = 'asc';
+      if (state.focusLogSort && state.focusLogSort.column === col) {
+        dir = state.focusLogSort.direction === 'asc' ? 'desc' : 'asc';
+      }
+      state.focusLogSort = { column: col, direction: dir };
+      saveLogsToStorage();
+    });
+  });
+}
+
+export function updateFocusTableSortIcons() {
+  const headers = document.querySelectorAll('.focus-th-sortable');
+  const sort = state.focusLogSort || { column: 'date', direction: 'desc' };
+  headers.forEach(th => {
+    const col = th.getAttribute('data-col');
+    const iconSpan = th.querySelector('.sort-icon');
+    if (iconSpan) {
+      if (sort.column === col) {
+        iconSpan.innerHTML = sort.direction === 'asc' ? ' <i class="fa-solid fa-caret-up"></i>' : ' <i class="fa-solid fa-caret-down"></i>';
+        th.classList.add('sorted');
+      } else {
+        iconSpan.innerHTML = '';
+        th.classList.remove('sorted');
+      }
+    }
+  });
 }
 
 function deleteLog(logId) {
@@ -2733,6 +2790,7 @@ function initApp() {
   // Focus and analytics init
   loadPomodoroData();
   renderPomodoro();
+  initFocusTableSort();
   renderAnalytics();
   updateBacklinks();
   updateHistoryButtons();
