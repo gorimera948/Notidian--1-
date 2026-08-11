@@ -5,6 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Notidian - Notion × Obsidian × Pomodoro</title>
+  <!-- Favicon Emoji -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%225%22 y=%2280%22 font-size=%2280%22>🌙</text></svg>">
   <!-- Google Fonts: Outfit (UI), Inter (Editor), Fira Code (Code) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,7 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="./src/style.css">
 </head>
 
 <body>
@@ -30,134 +32,197 @@
         </div>
       </div>
 
-      <!-- Section: Pomodoro Widget (Pinned at Top) -->
-      <div class="sidebar-section pomodoro-section">
-        <div class="section-header toggle-header" id="pomodoro-toggle">
-          <h3><i class="fa-solid fa-hourglass-half"></i> ポモドーロタイマー</h3>
-          <i class="fa-solid fa-chevron-down toggle-icon"></i>
-        </div>
+      <!-- SIDEBAR TABS -->
+      <div class="sidebar-tabs" id="left-sidebar-tabs">
+        <button class="sidebar-tab-btn active" data-tab="tab-notes" title="ノート一覧">
+          <i class="fa-regular fa-file-lines"></i>
+          <span>ノート</span>
+        </button>
+        <button class="sidebar-tab-btn" data-tab="tab-pomodoro" title="ポモドーロタイマー">
+          <i class="fa-solid fa-hourglass-half"></i>
+          <span>タイマー</span>
+        </button>
+      </div>
 
-        <div class="pomodoro-content" id="pomodoro-widget-content">
-          <!-- Timer Display Card -->
-          <div class="timer-card">
-            <div class="timer-display-wrapper">
-              <div class="timer-text-group">
-                <div id="currentIndex">0/0</div>
-                <div id="taskName" title="現在のタスク">未選択</div>
-                <div id="time">00:00</div>
+      <div class="sidebar-content-wrapper">
+        <!-- Tab 1: Notes -->
+        <div class="sidebar-tab-content active" id="tab-notes">
+          <!-- Section: Notes Manager -->
+          <div class="sidebar-section notes-section">
+            <div class="section-header">
+              <h3>ノート一覧</h3>
+              <div class="sidebar-header-actions">
+                <button id="new-note-btn" class="btn-icon-primary" title="新規ノート作成">
+                  <i class="fa-solid fa-plus"></i>
+                </button>
+                <button id="new-folder-btn" class="btn-icon-secondary" title="新規フォルダ作成">
+                  <i class="fa-solid fa-folder-plus"></i>
+                </button>
+                <button id="daily-note-btn" class="btn-icon-secondary" title="今日のデイリーを作成">
+                  <i class="fa-regular fa-calendar-plus"></i>
+                </button>
+                <button id="templates-btn" class="btn-icon-secondary" title="テンプレート管理">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                </button>
               </div>
-              <canvas id="circle" width="130" height="130"></canvas>
             </div>
-
-            <div class="timer-controls">
-              <button id="btn-start" onclick="startTimer()" class="btn-timer btn-start" title="開始">
-                <i class="fa-solid fa-play"></i> 開始
-              </button>
-              <button id="btn-pause" onclick="pauseTimer()" class="btn-timer btn-pause" title="一時停止">
-                <i class="fa-solid fa-pause"></i> 一時停止
-              </button>
-              <button id="btn-stop" onclick="stopTimer()" class="btn-timer btn-stop" title="停止">
-                <i class="fa-solid fa-square"></i> 停止
+            <div class="search-box" style="position: relative; display: flex; align-items: center; width: 100%;">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" id="search-notes" placeholder="ノート・フォルダを検索..." style="width: 100%; padding-right: 28px;">
+              <button id="clear-search-btn" class="btn-clear-search" title="検索をリセット"
+                style="display: none; position: absolute; right: 8px; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; font-size: 12px; transition: color 0.2s;">
+                <i class="fa-solid fa-circle-xmark"></i>
               </button>
             </div>
-
-            <!-- 音量スライダー -->
-            <div class="timer-volume-control"
-              style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; padding: 0 10px;">
-              <span style="font-size: 11px; color: var(--text-muted, #6b7280);"><i class="fa-solid fa-volume-high"></i>
-                音量</span>
-              <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="0.5"
-                style="flex: 1; height: 4px; cursor: pointer;">
+            <ul id="note-list" class="note-list">
+              <!-- Dynamically populated -->
+            </ul>
+            <!-- Tags Section inside sidebar -->
+            <div class="sidebar-tags-wrapper"
+              style="margin-top: 20px; padding: 0 12px; border-top: 1px solid var(--border-color, #374151); padding-top: 16px; padding-bottom: 80px;">
+              <div
+                style="font-size: 11px; font-weight: 700; color: var(--text-muted, #6b7280); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-tags" style="color: var(--accent-secondary, #ec4899);"></i> タグ一覧
+              </div>
+              <div id="sidebar-tags-list" style="display: flex; flex-wrap: wrap; gap: 6px;">
+                <!-- Dynamically populated tags -->
+              </div>
             </div>
           </div>
+        </div>
 
-          <!-- Pomodoro Manager -->
-          <div class="pomodoro-settings">
-            <!-- 1. Schedule View -->
-            <div class="settings-group">
-              <div class="settings-group-header">
-                <h4>現在のスケジュール</h4>
-              </div>
-              <div id="schedule" class="schedule-container">
-                <!-- Dynamically populated -->
-              </div>
+        <!-- Tab 2: Pomodoro -->
+        <div class="sidebar-tab-content" id="tab-pomodoro">
+          <!-- Section: Pomodoro Widget -->
+          <div class="sidebar-section pomodoro-section">
+            <div class="section-header toggle-header" id="pomodoro-toggle">
+              <h3><i class="fa-solid fa-hourglass-half"></i> ポモドーロタイマー</h3>
+              <i class="fa-solid fa-chevron-down toggle-icon"></i>
             </div>
 
-            <!-- 2. Set Creation & Presets -->
-            <div class="settings-group">
-              <div class="accordion-header" id="accordion-sets-header">
-                <span><i class="fa-solid fa-plus"></i> セット / スケジュール追加</span>
-                <i class="fa-solid fa-chevron-right arrow-icon"></i>
+            <div class="pomodoro-content" id="pomodoro-widget-content">
+              <!-- Timer Display Card -->
+              <div class="timer-card" id="pomodoro-timer-card">
+                <div class="timer-display-wrapper">
+                  <canvas id="circle" width="130" height="130"></canvas>
+                  <div class="timer-text-group">
+                    <div id="currentIndex">0/0</div>
+                    <div id="time">00:00</div>
+                    <div id="taskName" title="現在のタスク">未選択</div>
+                  </div>
+                </div>
+
+                <div class="timer-controls">
+                  <button id="btn-start" onclick="startTimer()" class="btn-timer btn-start" title="開始">
+                    <i class="fa-solid fa-play"></i> 開始
+                  </button>
+                  <button id="btn-pause" onclick="pauseTimer()" class="btn-timer btn-pause" title="一時停止">
+                    <i class="fa-solid fa-pause"></i> 一時停止
+                  </button>
+                  <button id="btn-stop" onclick="stopTimer()" class="btn-timer btn-stop" title="停止">
+                    <i class="fa-solid fa-square"></i> 停止
+                  </button>
+                </div>
+
+                <!-- 音量スライダー -->
+                <div class="timer-volume-control"
+                  style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px; padding: 0 10px;">
+                  <span style="font-size: 11px; color: var(--text-muted, #6b7280);"><i class="fa-solid fa-volume-high"></i>
+                    音量</span>
+                  <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="0.5"
+                    style="flex: 1; height: 4px; cursor: pointer;">
+                </div>
               </div>
-              <div class="accordion-body" id="accordion-sets-body">
-                <!-- Create Set -->
-                <div class="set-creation">
-                  <input id="name" placeholder="セット名 (例: 記事執筆)">
-                  <div class="time-inputs">
-                    <div class="input-col">
-                      <label>作業</label>
-                      <div class="input-row" style="display:flex; align-items:center; gap:4px;">
-                        <input id="workMin" type="number" placeholder="分" value="25" min="0" style="width:50px;"> <span
-                          style="font-size:11px; color:var(--text-secondary); margin-right:6px;">分</span>
-                        <input id="workSec" type="number" placeholder="秒" value="0" min="0" max="59"
-                          style="width:50px;"> <span style="font-size:11px; color:var(--text-secondary);">秒</span>
+
+              <!-- Pomodoro Manager -->
+              <div class="pomodoro-settings">
+                <!-- 1. Schedule View -->
+                <div class="pomodoro-card">
+                  <div class="settings-group-header">
+                    <h4>現在のスケジュール</h4>
+                  </div>
+                  <div id="schedule" class="schedule-container">
+                    <!-- Dynamically populated -->
+                  </div>
+                </div>
+
+                <!-- 2. Set Creation & Presets -->
+                <div class="pomodoro-card">
+                  <div class="accordion-header" id="accordion-sets-header">
+                    <span><i class="fa-solid fa-plus"></i> セット / スケジュール追加</span>
+                    <i class="fa-solid fa-chevron-right arrow-icon"></i>
+                  </div>
+                  <div class="accordion-body" id="accordion-sets-body">
+                    <!-- Create Set -->
+                    <div class="set-creation">
+                      <input id="name" placeholder="セット名 (例: 記事執筆)">
+                      <div class="time-inputs">
+                        <div class="input-col">
+                          <label>作業</label>
+                          <div class="input-row" style="display:flex; align-items:center; gap:4px;">
+                            <input id="workMin" type="number" placeholder="分" value="25" min="0" style="width:50px;"> <span
+                              style="font-size:11px; color:var(--text-secondary); margin-right:6px;">分</span>
+                            <input id="workSec" type="number" placeholder="秒" value="0" min="0" max="59"
+                              style="width:50px;"> <span style="font-size:11px; color:var(--text-secondary);">秒</span>
+                          </div>
+                        </div>
+                        <div class="input-col">
+                          <label>休憩</label>
+                          <div class="input-row" style="display:flex; align-items:center; gap:4px;">
+                            <input id="restMin" type="number" placeholder="分" value="5" min="0" style="width:50px;"> <span
+                              style="font-size:11px; color:var(--text-secondary); margin-right:6px;">分</span>
+                            <input id="restSec" type="number" placeholder="秒" value="0" min="0" max="59"
+                              style="width:50px;"> <span style="font-size:11px; color:var(--text-secondary);">秒</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="set-actions-row">
+                        <button onclick="addSet()" class="btn-secondary" style="flex: 1;">セット作成</button>
                       </div>
                     </div>
-                    <div class="input-col">
-                      <label>休憩</label>
-                      <div class="input-row" style="display:flex; align-items:center; gap:4px;">
-                        <input id="restMin" type="number" placeholder="分" value="5" min="0" style="width:50px;"> <span
-                          style="font-size:11px; color:var(--text-secondary); margin-right:6px;">分</span>
-                        <input id="restSec" type="number" placeholder="秒" value="0" min="0" max="59"
-                          style="width:50px;"> <span style="font-size:11px; color:var(--text-secondary);">秒</span>
+
+                    <hr class="divider">
+
+                    <!-- Add Schedule -->
+                    <div class="schedule-adder">
+                      <label>セット選択して追加</label>
+                      <div class="row-select">
+                        <select id="setSelect"></select>
+                        <button onclick="addSchedule()" class="btn-add" title="スケジュールに追加"><i
+                            class="fa-solid fa-plus"></i></button>
+                        <button onclick="deleteSet()" class="btn-del-set" title="セットを削除"><i
+                            class="fa-solid fa-trash-can"></i></button>
+                      </div>
+                    </div>
+
+                    <!-- Target Table Selection -->
+                    <div class="schedule-adder" style="margin-top: 10px;">
+                      <label><i class="fa-solid fa-database" style="color: var(--accent-primary); margin-right: 4px;"></i>
+                        ログ挿入先テーブル</label>
+                      <div class="row-select">
+                        <select id="timerTargetTableSelect" style="width: 100%;" onchange="changeTargetTable()"></select>
                       </div>
                     </div>
                   </div>
-                  <div class="set-actions-row">
-                    <button onclick="addSet()" class="btn-secondary" style="flex: 1;">セット作成</button>
-                  </div>
                 </div>
 
-                <hr class="divider">
-
-                <!-- Add Schedule -->
-                <div class="schedule-adder">
-                  <label>セット選択して追加</label>
-                  <div class="row-select">
-                    <select id="setSelect"></select>
-                    <button onclick="addSchedule()" class="btn-add" title="スケジュールに追加"><i
-                        class="fa-solid fa-plus"></i></button>
-                    <button onclick="deleteSet()" class="btn-del-set" title="セットを削除"><i
-                        class="fa-solid fa-trash-can"></i></button>
+                <div class="pomodoro-card">
+                  <div class="accordion-header" id="accordion-presets-header">
+                    <span><i class="fa-solid fa-bookmark"></i> スケジュールプリセット</span>
+                    <i class="fa-solid fa-chevron-right arrow-icon"></i>
                   </div>
-                </div>
-
-                <!-- Target Table Selection -->
-                <div class="schedule-adder" style="margin-top: 10px;">
-                  <label><i class="fa-solid fa-database" style="color: var(--accent-primary); margin-right: 4px;"></i>
-                    ログ挿入先テーブル</label>
-                  <div class="row-select">
-                    <select id="timerTargetTableSelect" style="width: 100%;" onchange="changeTargetTable()"></select>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-group">
-              <div class="accordion-header" id="accordion-presets-header">
-                <span><i class="fa-solid fa-bookmark"></i> スケジュールプリセット</span>
-                <i class="fa-solid fa-chevron-right arrow-icon"></i>
-              </div>
-              <div class="accordion-body" id="accordion-presets-body">
-                <div class="preset-manager">
-                  <div class="input-row">
-                    <input id="presetName" placeholder="プリセット名">
-                    <button onclick="savePreset()" class="btn-secondary">登録</button>
-                  </div>
-                  <div class="row-select">
-                    <select id="presetSelect" onchange="loadPreset()"></select>
-                    <button onclick="deletePreset()" class="btn-del-preset" title="プリセットを削除"><i
-                        class="fa-solid fa-trash-can"></i></button>
+                  <div class="accordion-body" id="accordion-presets-body">
+                    <div class="preset-manager">
+                      <div class="input-row">
+                        <input id="presetName" placeholder="プリセット名">
+                        <button onclick="savePreset()" class="btn-secondary">登録</button>
+                      </div>
+                      <div class="row-select">
+                        <select id="presetSelect" onchange="loadPreset()"></select>
+                        <button onclick="deletePreset()" class="btn-del-preset" title="プリセットを削除"><i
+                            class="fa-solid fa-trash-can"></i></button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -165,34 +230,9 @@
           </div>
         </div>
       </div>
-
-      <!-- Section: Notes Manager (Scrolls below timer) -->
-      <div class="sidebar-section notes-section">
-        <div class="section-header">
-          <h3>ノート一覧</h3>
-          <div class="sidebar-header-actions">
-            <button id="new-note-btn" class="btn-icon-primary" title="新規ノート作成">
-              <i class="fa-solid fa-plus"></i>
-            </button>
-            <button id="new-folder-btn" class="btn-icon-secondary" title="新規フォルダ作成">
-              <i class="fa-solid fa-folder-plus"></i>
-            </button>
-            <button id="daily-note-btn" class="btn-icon-secondary" title="今日のデイリーを作成">
-              <i class="fa-regular fa-calendar-plus"></i>
-            </button>
-            <button id="templates-btn" class="btn-icon-secondary" title="テンプレート管理">
-              <i class="fa-solid fa-wand-magic-sparkles"></i>
-            </button>
-          </div>
-        </div>
-        <div class="search-box">
-          <i class="fa-solid fa-magnifying-glass search-icon"></i>
-          <input type="text" id="search-notes" placeholder="ノート・フォルダを検索...">
-        </div>
-        <ul id="note-list" class="note-list">
-          <!-- Dynamically populated -->
-        </ul>
-      </div>
+      <button class="sidebar-toggle-btn toggle-left" id="sidebar-left-toggle" title="サイドバーを閉じる">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
     </aside>
 
     <!-- CENTER: Notion Block Editor -->
@@ -215,13 +255,19 @@
             </div>
           </div>
           <div class="editor-actions">
-            <span class="save-status" id="save-status"><i class="fa-solid fa-cloud-arrow-up"></i> 自動保存済み</span>
+            <button id="btn-split-editor" class="btn-secondary" title="画面を左右に分割" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;">
+              <i class="fa-solid fa-table-columns"></i> <span>左右に分割</span>
+            </button>
           </div>
         </div>
 
         <!-- Editable Title -->
         <div class="note-title-wrapper">
           <input type="text" id="note-title-input" class="note-title-input" placeholder="無題" value="">
+        </div>
+        <!-- Note Tags Panel -->
+        <div id="note-tags-panel" class="note-tags-panel"
+          style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 54px 16px 54px; padding: 0;">
         </div>
 
         <!-- Bidirectional Navigation Panel -->
@@ -244,6 +290,8 @@
         <div class="slash-menu-header">ブロックタイプを選択</div>
         <ul class="slash-menu-list">
           <li data-type="p" class="active">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-paragraph"></i>
             <div>
               <span class="menu-label">テキスト</span>
@@ -251,6 +299,8 @@
             </div>
           </li>
           <li data-type="h1">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-heading" style="transform: scale(0.95);"></i>
             <div>
               <span class="menu-label">見出し 1</span>
@@ -258,6 +308,8 @@
             </div>
           </li>
           <li data-type="h2">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-heading" style="transform: scale(0.85);"></i>
             <div>
               <span class="menu-label">見出し 2</span>
@@ -265,6 +317,8 @@
             </div>
           </li>
           <li data-type="toggle">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-caret-right"></i>
             <div>
               <span class="menu-label">トグルリスト</span>
@@ -272,6 +326,8 @@
             </div>
           </li>
           <li data-type="todo">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-regular fa-square-check"></i>
             <div>
               <span class="menu-label">ToDoリスト</span>
@@ -279,6 +335,8 @@
             </div>
           </li>
           <li data-type="bullet">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-list-ul"></i>
             <div>
               <span class="menu-label">箇条書きリスト</span>
@@ -286,6 +344,8 @@
             </div>
           </li>
           <li data-type="database">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-table"></i>
             <div>
               <span class="menu-label">テーブルビュー</span>
@@ -293,6 +353,8 @@
             </div>
           </li>
           <li data-type="callout">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-regular fa-lightbulb"></i>
             <div>
               <span class="menu-label">コールアウト</span>
@@ -300,10 +362,21 @@
             </div>
           </li>
           <li data-type="divider">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
             <i class="fa-solid fa-minus"></i>
             <div>
               <span class="menu-label">区切り線</span>
               <span class="menu-desc">セクションを分ける細い水平線。</span>
+            </div>
+          </li>
+          <li data-type="image">
+            <i class="fa-solid fa-grip-vertical drag-handle"
+              style="cursor: grab; margin-right: 8px; color: var(--text-muted); opacity: 0.5; padding: 4px 2px;"></i>
+            <i class="fa-regular fa-image"></i>
+            <div>
+              <span class="menu-label">画像</span>
+              <span class="menu-desc">画像をローカルからアップロード、またはURLから挿入します。</span>
             </div>
           </li>
         </ul>
@@ -312,72 +385,114 @@
       <!-- WikiLink Autocomplete Menu -->
       <div id="link-menu" class="link-menu">
         <div class="link-menu-header">ノートをリンク...</div>
+        <div class="link-menu-search-wrapper"
+          style="padding: 8px 12px; border-bottom: 1px solid var(--border-color, #e5e7eb);">
+          <input type="text" id="link-menu-search-input" placeholder="キーワードを入力して検索..."
+            style="width: 100%; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-color, #e5e7eb); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; outline: none; box-sizing: border-box;">
+        </div>
         <ul id="link-menu-list" class="link-menu-list">
           <!-- Populated dynamically with notes list -->
         </ul>
       </div>
     </main>
 
-    <!-- RIGHT SIDEBAR: Pomodoro Table/Analytics -->
+    <!-- RIGHT SIDEBAR: Pomodoro Table/Analytics & Mind Map -->
     <aside class="sidebar-right">
-      <div class="tabs-header" style="justify-content: center;">
-        <span class="tab-btn-static"
-          style="color: var(--text-primary); font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">
-          <i class="fa-solid fa-chart-line" style="color: var(--accent-primary);"></i> ポモドーロ分析
-        </span>
+      <!-- SIDEBAR TABS -->
+      <div class="sidebar-tabs" id="right-sidebar-tabs">
+        <button class="sidebar-tab-btn active" data-tab="tab-analytics" title="作業時間分析">
+          <i class="fa-solid fa-chart-line"></i>
+          <span>分析</span>
+        </button>
+        <button class="sidebar-tab-btn" data-tab="tab-mindmap" title="マインドマップ">
+          <i class="fa-solid fa-circle-nodes"></i>
+          <span>マップ</span>
+        </button>
       </div>
 
-      <div class="sidebar-right-content">
-
-        <!-- Tab 1: Pomodoro Focus Analytics -->
-        <div id="tab-analytics" class="tab-content active">
-          <!-- Cumulative Stats Card -->
-          <div class="analytics-card">
-            <h4><i class="fa-solid fa-calendar-week"></i> 過去7日間の累計集中時間</h4>
-            <div class="chart-wrapper">
-              <!-- Inline Dynamic SVG Chart -->
-              <svg id="cumulative-chart" viewBox="0 0 300 150" width="100%" height="100%">
-                <!-- Dynamically generated SVG bars -->
-              </svg>
+      <div class="sidebar-content-wrapper">
+        <!-- Tab 1: Analytics -->
+        <div class="sidebar-tab-content active" id="tab-analytics">
+          <div class="sidebar-right-content">
+            <!-- Cumulative Stats Card -->
+            <div class="analytics-card">
+              <h4><i class="fa-solid fa-calendar-week"></i> 過去7日間の累計作業時間</h4>
+              <div class="chart-wrapper">
+                <!-- Inline Dynamic SVG Chart -->
+                <svg id="cumulative-chart" viewBox="0 0 300 150" width="100%" height="100%">
+                  <!-- Dynamically generated SVG bars -->
+                </svg>
+              </div>
             </div>
-          </div>
 
-          <div class="analytics-card">
-            <h4><i class="fa-solid fa-chart-pie"></i> タスク別集中時間配分</h4>
-            <div id="task-breakdown" class="task-breakdown-list">
-              <!-- Dynamically generated progress bars -->
-              <div class="no-data-msg">記録がまだありません。タイマーを完了させましょう！</div>
+            <div class="analytics-card">
+              <h4><i class="fa-solid fa-chart-pie"></i> タスク別作業時間配分</h4>
+              <div id="task-breakdown" class="task-breakdown-list">
+                <!-- Dynamically generated progress bars -->
+                <div class="no-data-msg">記録がまだありません。タイマーを完了させましょう！</div>
+              </div>
             </div>
-          </div>
 
-          <!-- Notion Focus Table View -->
-          <div class="analytics-card table-card">
-            <div class="table-header-group">
-              <h4><i class="fa-solid fa-table"></i> 集中時間データベース</h4>
-              <button onclick="clearAllLogs()" class="btn-clear-logs" title="すべての記録を削除">
-                <i class="fa-solid fa-trash-can"></i>
-              </button>
-            </div>
-            <div class="table-scroll-container">
-              <table class="notion-table" id="focus-table">
-                <thead>
-                  <tr>
-                    <th>日付</th>
-                    <th>タスク名</th>
-                    <th>時間(分)</th>
-                    <th>ステータス</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="focus-table-body">
-                  <!-- Dynamically populated rows -->
-                </tbody>
-              </table>
+            <!-- Notion Focus Table View -->
+            <div class="analytics-card table-card">
+              <div class="table-header-group">
+                <h4><i class="fa-solid fa-table"></i> 作業時間データベース</h4>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button id="btn-focus-delete-selected" class="btn-clear-logs" title="選択した記録を削除" style="display: none; color: #fca5a5; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35);">
+                    <i class="fa-solid fa-trash-can"></i>
+                  </button>
+                  <button onclick="copyFocusTableToExcel()" class="btn-clear-logs" title="Excel用にコピー" style="margin-right: 4px;">
+                    <i class="fa-solid fa-copy"></i>
+                  </button>
+                  <button onclick="clearAllLogs()" class="btn-clear-logs" title="すべての記録を削除">
+                    <i class="fa-solid fa-trash-can"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="table-scroll-container">
+                <table class="notion-table" id="focus-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 30px; text-align: center;"><input type="checkbox" id="focus-select-all" style="cursor: pointer; margin: 0;"></th>
+                      <th class="focus-th-sortable" data-col="date">日付<span class="sort-icon"></span></th>
+                      <th class="focus-th-sortable" data-col="taskName">タスク名<span class="sort-icon"></span></th>
+                      <th class="focus-th-sortable" data-col="duration" style="text-align: center;">時間(分)<span class="sort-icon"></span></th>
+                      <th class="focus-th-sortable" data-col="status">ステータス<span class="sort-icon"></span></th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="focus-table-body">
+                    <!-- Dynamically populated rows -->
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
 
+        <!-- Tab 2: Mind Map -->
+        <div class="sidebar-tab-content" id="tab-mindmap">
+          <!-- Section: Mind Map -->
+          <div class="sidebar-section mindmap-section" style="padding: 15px 20px; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; overflow: hidden; height: 100%;">
+            <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <h3 style="font-size: 11px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1.5px; display: flex; align-items: center; gap: 6px; margin: 0;">
+                <i class="fa-solid fa-circle-nodes" style="color: var(--accent-secondary, #ec4899);"></i> マインドマップ
+              </h3>
+              <div style="display: flex; gap: 4px;">
+                <button id="btn-mindmap-fullscreen" class="btn-secondary" style="font-size: 10px; padding: 2px 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-light); color: var(--text-secondary); border-radius: 4px; cursor: pointer; transition: var(--transition-smooth);" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'" title="全画面で表示"><i class="fa-solid fa-expand"></i> 全画面</button>
+                <button id="btn-mindmap-reset" class="btn-secondary" style="font-size: 10px; padding: 2px 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-light); color: var(--text-secondary); border-radius: 4px; cursor: pointer; transition: var(--transition-smooth);" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'" title="配置をリセット">リセット</button>
+              </div>
+            </div>
+            <div class="mindmap-container" style="flex: 1; position: relative; border-radius: 8px; overflow: hidden; background: rgba(0,0,0,0.35); border: 1px solid var(--border-light); min-height: 0; box-sizing: border-box;">
+              <canvas id="mindmap-canvas" style="display: block; width: 100%; height: 100%; cursor: grab;"></canvas>
+              <div id="mindmap-tooltip" style="position: absolute; display: none; background: rgba(15, 20, 35, 0.95); border: 1px solid rgba(139, 92, 246, 0.4); border-radius: 6px; padding: 6px 10px; font-size: 11px; color: #fff; pointer-events: none; white-space: nowrap; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.5); backdrop-filter: blur(4px);"></div>
+            </div>
+          </div>
+        </div>
       </div>
+      <button class="sidebar-toggle-btn toggle-right" id="sidebar-right-toggle" title="サイドバーを閉じる">
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
     </aside>
 
   </div>
@@ -397,12 +512,16 @@
   </div>
 
   <!-- Floating Block Bulk Action Bar -->
-  <div id="block-bulk-action-bar" class="db-bulk-action-bar" style="display: none; border-color: var(--accent-secondary, #ec4899); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), 0 0 15px rgba(236, 72, 153, 0.25);">
+  <div id="block-bulk-action-bar" class="db-bulk-action-bar"
+    style="display: none; border-color: var(--accent-secondary, #ec4899); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), 0 0 15px rgba(236, 72, 153, 0.25);">
     <div class="bulk-info">
       <i class="fa-solid fa-square-check" style="color: var(--accent-secondary); margin-right: 6px;"></i>
       <span id="block-bulk-select-count">0</span> 件のブロック選択中
     </div>
     <div class="bulk-actions">
+      <button id="btn-block-bulk-duplicate" class="btn-bulk-action" style="background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(139, 92, 246, 0.4); color: var(--text-primary); margin-right: 6px;">
+        <i class="fa-regular fa-clipboard"></i> 一括複製
+      </button>
       <button id="btn-block-bulk-delete" class="btn-bulk-action btn-bulk-danger">
         <i class="fa-solid fa-trash-can"></i> 一括削除
       </button>
@@ -412,7 +531,15 @@
     </button>
   </div>
 
-  <script src="app.js"></script>
+  <!-- Tag Autocomplete Candidates Datalist -->
+  <datalist id="existing-tags-datalist"></datalist>
+
+  <!-- Floating WikiLink Toolbar -->
+  <div id="notidian-floating-toolbar" class="floating-toolbar" style="display: none;">
+    <button class="toolbar-btn" id="btn-floating-wikilink" title="WikiLinkを作成"><i class="fa-solid fa-link"></i> リンク</button>
+  </div>
+
+  <script type="module" src="./src/app.js"></script>
 </body>
 
 </html>
