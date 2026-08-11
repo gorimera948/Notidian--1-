@@ -10,6 +10,8 @@ import {
   saveNotesToStorage,
   saveCustomTagColorsToStorage,
   saveLogsToStorage,
+  createNotidianSnapshot,
+  applyNotidianSnapshot,
   initStorage
 } from './state.js';
 
@@ -75,12 +77,44 @@ import {
   initSlashMenuSortable,
   uncolumn,
   showLinkEditPopover,
-  toggleSplitView
+  toggleSplitView,
+  exportAllData,
+  triggerImportData
 } from './editor.js';
 
 import { MindMap } from './mindmap.js';
+import { initDropboxSync } from './sync.js';
 
 let mindMapInstance = null;
+
+function initMobileDataActions() {
+  if (document.querySelector('.mobile-data-actions')) return;
+
+  const actions = document.createElement('div');
+  actions.className = 'mobile-data-actions';
+
+  const exportBtn = document.createElement('button');
+  exportBtn.type = 'button';
+  exportBtn.className = 'mobile-data-action-btn mobile-export-btn';
+  exportBtn.innerHTML = '<i class="fa-solid fa-file-export"></i><span>書き出し</span>';
+  exportBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    exportAllData();
+  });
+  actions.appendChild(exportBtn);
+
+  const importBtn = document.createElement('button');
+  importBtn.type = 'button';
+  importBtn.className = 'mobile-data-action-btn mobile-import-btn';
+  importBtn.innerHTML = '<i class="fa-solid fa-file-import"></i><span>読み込み</span>';
+  importBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    triggerImportData();
+  });
+  actions.appendChild(importBtn);
+
+  document.body.appendChild(actions);
+}
 
 // ==========================================
 // SHARED GLOBAL API HUB (Notidian)
@@ -90,6 +124,8 @@ window.Notidian = {
   state,
   saveNotesToStorage,
   saveLogsToStorage,
+  createNotidianSnapshot,
+  applyNotidianSnapshot,
   undo,
   redo,
 
@@ -104,6 +140,8 @@ window.Notidian = {
   setupDragSelection,
   initSlashMenuSortable,
   uncolumn,
+  exportAllData,
+  triggerImportData,
 
   // database
   createDatabaseDOM,
@@ -127,6 +165,7 @@ window.Notidian = {
   endAlertSound,
   drawCirclePizza,
   setTimerVolume,
+  initDropboxSync,
 
   // app
   navigateToNote,
@@ -2527,6 +2566,7 @@ function initApp() {
   initFloatingToolbar(); // 追加
   initSlashMenuSortable();
   setupDragSelection();
+  initMobileDataActions();
 
   // Initialize MindMap
   mindMapInstance = new MindMap();
@@ -2623,6 +2663,7 @@ function initApp() {
   renderNoteList();
   renderEditor();
   updateTimerTargetTableSelect();
+  initDropboxSync();
 
   // Search input clear triggers
   const clearSearchBtn = document.getElementById('clear-search-btn');

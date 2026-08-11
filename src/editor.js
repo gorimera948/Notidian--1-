@@ -1,7 +1,8 @@
-import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, historyState } from './state.js';
+import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, historyState, createNotidianSnapshot, applyNotidianSnapshot } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
 import { createDatabaseDOM, removeBlocksRecursively, updateBulkActionBar, updateBlockBulkActionBar } from './database.js';
+import { createDropboxSyncControls } from './sync.js';
 
 function renderNoteList() {
   if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
@@ -324,6 +325,8 @@ export function renderEditor() {
       triggerImportData();
     });
     toolbarRight.appendChild(importBtn);
+
+    toolbarRight.appendChild(createDropboxSyncControls());
 
     const splitBtn = document.createElement('button');
     splitBtn.className = 'btn-secondary';
@@ -4206,32 +4209,107 @@ function insertSpeechText(text) {
   }
 }
 
-export function exportAllData() {
-  const data = {
-    notes: JSON.parse(localStorage.getItem('notidian_notes')) || [],
-    folders: JSON.parse(localStorage.getItem('notidian_folders')) || [],
-    collapsedFolders: JSON.parse(localStorage.getItem('notidian_collapsed_folders')) || [],
-    dailyFolderId: localStorage.getItem('notidian_daily_folder_id') || '',
-    focusLogs: JSON.parse(localStorage.getItem('notidian_focus_logs')) || [],
-    customTagColors: JSON.parse(localStorage.getItem('notidian_custom_tag_colors')) || {}
-  };
+function showExportBackupModal(jsonStr, filename) {
+  const old = document.querySelector('.export-backup-overlay');
+  if (old) old.remove();
 
-  const jsonStr = JSON.stringify(data, null, 2);
+  const overlay = document.createElement('div');
+  overlay.className = 'export-backup-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = 'export-backup-modal';
+
+  const title = document.createElement('h3');
+  title.innerHTML = '<i class="fa-solid fa-file-export"></i> 書き出しデータ';
+  modal.appendChild(title);
+
+  const desc = document.createElement('p');
+  desc.textContent = 'ダウンロードが始まらない場合は、下のボタンでJSONをコピーできます。';
+  modal.appendChild(desc);
+
+  const meta = document.createElement('div');
+  meta.className = 'export-backup-meta';
+  meta.textContent = `${filename} / ${(jsonStr.length / 1024).toFixed(1)} KB`;
+  modal.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'export-backup-actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn-secondary';
+  copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i><span>JSONをコピー</span>';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(jsonStr);
+      showToast('バックアップJSONをコピーしました');
+    } catch (err) {
+      textarea.hidden = false;
+      textarea.focus();
+      textarea.select();
+      showToast('コピーできない場合はテキストを選択してください');
+    }
+  });
+  actions.appendChild(copyBtn);
+
+  const retryBtn = document.createElement('button');
+  retryBtn.type = 'button';
+  retryBtn.className = 'btn-secondary';
+  retryBtn.innerHTML = '<i class="fa-solid fa-download"></i><span>再ダウンロード</span>';
+  retryBtn.addEventListener('click', () => downloadBackupJSON(jsonStr, filename));
+  actions.appendChild(retryBtn);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn-secondary';
+  closeBtn.textContent = '閉じる';
+  closeBtn.addEventListener('click', () => overlay.remove());
+  actions.appendChild(closeBtn);
+
+  modal.appendChild(actions);
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'export-backup-textarea';
+  textarea.value = jsonStr;
+  textarea.hidden = true;
+  modal.appendChild(textarea);
+
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+  document.body.appendChild(overlay);
+}
+
+function downloadBackupJSON(jsonStr, filename) {
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  
+
   const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function exportAllData() {
+  const data = createNotidianSnapshot();
+  const jsonStr = JSON.stringify(data, null, 2);
   const d = new Date();
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const date = String(d.getDate()).padStart(2, '0');
   const dateStr = `${year}${month}${date}`;
-  a.href = url;
-  a.download = `notidian_backup_${dateStr}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const filename = `notidian_backup_${dateStr}.json`;
+
+  downloadBackupJSON(jsonStr, filename);
+  showExportBackupModal(jsonStr, filename);
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(jsonStr).catch(() => {});
+  }
 }
 
 function cleanJSONText(text) {
@@ -4279,46 +4357,14 @@ function processImportedJSON(jsonText) {
   try {
     const cleanedText = cleanJSONText(jsonText);
     const data = JSON.parse(cleanedText);
-    if (!data || !Array.isArray(data.notes)) {
+    const importData = data && data.data && Array.isArray(data.data.notes) ? data.data : data;
+    if (!importData || !Array.isArray(importData.notes)) {
       alert('不正なバックアップファイルです。有効な Notidian バックアップ JSON を選択してください。');
       return false;
     }
 
     if (confirm('データをインポートすると、現在のすべてのノートや設定が上書きされます。よろしいですか？')) {
-      if (data.notes) {
-        localStorage.setItem('notidian_notes', JSON.stringify(data.notes));
-        state.notes = data.notes;
-      }
-      if (data.folders) {
-        localStorage.setItem('notidian_folders', JSON.stringify(data.folders));
-        state.folders = data.folders;
-      }
-      if (data.collapsedFolders) {
-        localStorage.setItem('notidian_collapsed_folders', JSON.stringify(data.collapsedFolders));
-        state.collapsedFolders = data.collapsedFolders;
-      }
-      if (data.dailyFolderId !== undefined) {
-        localStorage.setItem('notidian_daily_folder_id', data.dailyFolderId);
-        state.dailyFolderId = data.dailyFolderId;
-      }
-      if (data.focusLogs) {
-        localStorage.setItem('notidian_focus_logs', JSON.stringify(data.focusLogs));
-        state.focusLogs = data.focusLogs;
-      }
-      if (data.customTagColors) {
-        localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(data.customTagColors));
-        state.customTagColors = data.customTagColors;
-      }
-
-      if (state.notes.length > 0) {
-        state.activeNoteId = state.notes[0].id;
-        state.panes = [
-          { activeNoteId: state.activeNoteId, noteHistory: [state.activeNoteId], historyIndex: 0 },
-          { activeNoteId: null, noteHistory: [], historyIndex: -1 }
-        ];
-        localStorage.setItem('notidian_active_note_id', state.activeNoteId);
-      }
-
+      applyNotidianSnapshot(data, { resetActive: true, source: 'manual-import' });
       alert('データのインポートが完了しました。');
       window.location.reload();
       return true;
@@ -4648,6 +4694,3 @@ function showImageLightbox(url) {
   };
   document.addEventListener('keydown', escHandler);
 }
-
-
-

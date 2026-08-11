@@ -1,4 +1,4 @@
-import { state, saveLogsToStorage, saveNotesToStorage, getActiveNote } from './state.js';
+import { state, saveLogsToStorage, saveNotesToStorage, getActiveNote, markLocalDataChanged } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
 import { insertPomodoroStartToActiveTable, insertPomodoroLogToActiveNoteDb } from './database.js';
 
@@ -77,6 +77,7 @@ export function savePomodoroData() {
   localStorage.setItem("pomodoro_schedule", JSON.stringify(schedule));
   localStorage.setItem("pomodoro_presets", JSON.stringify(presets));
   localStorage.setItem("pomodoro_standalone_volume", timerVolume);
+  markLocalDataChanged('pomodoro');
 }
 
 export function setTimerVolume(val) {

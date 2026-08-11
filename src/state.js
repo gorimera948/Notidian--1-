@@ -48,6 +48,158 @@ export const historyState = {
   isApplying: false
 };
 
+const SYNC_META_STORAGE_KEY = 'notidian_sync_meta';
+const CLIENT_ID_STORAGE_KEY = 'notidian_client_id';
+
+function parseStorageJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    console.error(`Failed to parse ${key}:`, e);
+    return fallback;
+  }
+}
+
+function getClientId() {
+  let clientId = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+  if (!clientId) {
+    clientId = 'client-' + generateId();
+    localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId);
+  }
+  return clientId;
+}
+
+export function getLocalSyncMeta() {
+  const saved = parseStorageJSON(SYNC_META_STORAGE_KEY, null);
+  return {
+    updatedAt: Number(saved && saved.updatedAt) || 0,
+    clientId: (saved && saved.clientId) || getClientId(),
+    source: (saved && saved.source) || 'local'
+  };
+}
+
+export function setLocalSyncMeta(meta, notify = false) {
+  const next = {
+    updatedAt: Number(meta && meta.updatedAt) || Date.now(),
+    clientId: (meta && meta.clientId) || getClientId(),
+    source: (meta && meta.source) || 'local'
+  };
+  localStorage.setItem(SYNC_META_STORAGE_KEY, JSON.stringify(next));
+  if (notify && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('notidian:data-changed', { detail: next }));
+  }
+  return next;
+}
+
+export function markLocalDataChanged(source = 'local') {
+  if (typeof window !== 'undefined' &&
+      window.NotidianSync &&
+      typeof window.NotidianSync.isApplyingRemote === 'function' &&
+      window.NotidianSync.isApplyingRemote()) {
+    return getLocalSyncMeta();
+  }
+  return setLocalSyncMeta({ updatedAt: Date.now(), clientId: getClientId(), source }, true);
+}
+
+export function createNotidianSnapshot() {
+  return {
+    app: 'notidian',
+    schemaVersion: 1,
+    syncMeta: getLocalSyncMeta(),
+    data: {
+      notes: state.notes || [],
+      folders: state.folders || [],
+      collapsedFolders: state.collapsedFolders || [],
+      dailyFolderId: state.dailyFolderId || '',
+      focusLogs: state.focusLogs || [],
+      focusLogSort: state.focusLogSort || { column: 'date', direction: 'desc' },
+      customTagColors: state.customTagColors || {},
+      pomodoro: {
+        sets: parseStorageJSON('pomodoro_sets', []),
+        schedule: parseStorageJSON('pomodoro_schedule', []),
+        presets: parseStorageJSON('pomodoro_presets', []),
+        timerVolume: parseFloat(localStorage.getItem('pomodoro_standalone_volume') || '0.5')
+      },
+      timerTargetTableName: localStorage.getItem('timer_target_table_name') || ''
+    }
+  };
+}
+
+function getSnapshotData(snapshotOrData) {
+  if (snapshotOrData && snapshotOrData.data && Array.isArray(snapshotOrData.data.notes)) {
+    return snapshotOrData.data;
+  }
+  return snapshotOrData || {};
+}
+
+export function applyNotidianSnapshot(snapshotOrData, options = {}) {
+  const data = getSnapshotData(snapshotOrData);
+  if (!Array.isArray(data.notes)) {
+    throw new Error('Invalid Notidian snapshot: notes must be an array.');
+  }
+
+  if (data.notes) {
+    localStorage.setItem('notidian_notes', JSON.stringify(data.notes));
+    state.notes = data.notes;
+  }
+  if (data.folders) {
+    localStorage.setItem('notidian_folders', JSON.stringify(data.folders));
+    state.folders = data.folders;
+  }
+  if (data.collapsedFolders) {
+    localStorage.setItem('notidian_collapsed_folders', JSON.stringify(data.collapsedFolders));
+    state.collapsedFolders = data.collapsedFolders;
+  }
+  if (data.dailyFolderId !== undefined) {
+    localStorage.setItem('notidian_daily_folder_id', data.dailyFolderId || '');
+    state.dailyFolderId = data.dailyFolderId || null;
+  }
+  if (data.focusLogs) {
+    localStorage.setItem('notidian_focus_logs', JSON.stringify(data.focusLogs));
+    state.focusLogs = data.focusLogs;
+  }
+  if (data.focusLogSort) {
+    localStorage.setItem('notidian_focus_log_sort', JSON.stringify(data.focusLogSort));
+    state.focusLogSort = data.focusLogSort;
+  }
+  if (data.customTagColors) {
+    localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(data.customTagColors));
+    state.customTagColors = data.customTagColors;
+  }
+  if (data.pomodoro) {
+    localStorage.setItem('pomodoro_sets', JSON.stringify(data.pomodoro.sets || []));
+    localStorage.setItem('pomodoro_schedule', JSON.stringify(data.pomodoro.schedule || []));
+    localStorage.setItem('pomodoro_presets', JSON.stringify(data.pomodoro.presets || []));
+    localStorage.setItem('pomodoro_standalone_volume', data.pomodoro.timerVolume ?? 0.5);
+  }
+  if (data.timerTargetTableName !== undefined) {
+    localStorage.setItem('timer_target_table_name', data.timerTargetTableName || '');
+  }
+
+  if (options.resetActive || !state.notes.some(n => n.id === state.activeNoteId)) {
+    state.activeNoteId = state.notes[0] ? state.notes[0].id : null;
+    state.panes = [
+      { activeNoteId: state.activeNoteId, noteHistory: state.activeNoteId ? [state.activeNoteId] : [], historyIndex: state.activeNoteId ? 0 : -1 },
+      { activeNoteId: null, noteHistory: [], historyIndex: -1 }
+    ];
+    localStorage.setItem('notidian_active_note_id', state.activeNoteId || '');
+  }
+
+  if (snapshotOrData && snapshotOrData.syncMeta) {
+    setLocalSyncMeta(snapshotOrData.syncMeta, false);
+  } else if (options.markLocalChange !== false) {
+    markLocalDataChanged(options.source || 'import');
+  }
+
+  try {
+    historyState.undoStack = [JSON.stringify(state.notes)];
+    historyState.redoStack = [];
+  } catch (e) {
+    console.error("Failed to reset undo stack:", e);
+  }
+}
+
 export function pushHistory() {
   if (historyState.isApplying) return;
 
@@ -164,6 +316,7 @@ export function undo() {
 
   // ローカルストレージに保存し、エディタを再描画
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
+  markLocalDataChanged('undo');
   if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
     window.Notidian.renderNoteList();
   }
@@ -187,6 +340,7 @@ export function redo() {
 
   // ローカルストレージに保存し、エディタを再描画
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));
+  markLocalDataChanged('redo');
   if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
     window.Notidian.renderNoteList();
   }
@@ -233,6 +387,7 @@ export function saveNotesToStorage() {
   localStorage.setItem('notidian_folders', JSON.stringify(state.folders));
   localStorage.setItem('notidian_collapsed_folders', JSON.stringify(state.collapsedFolders));
   localStorage.setItem('notidian_daily_folder_id', state.dailyFolderId || '');
+  markLocalDataChanged('notes');
 
   if (window.Notidian && window.Notidian.mindMapInstance) {
     window.Notidian.mindMapInstance.updateData();
@@ -241,6 +396,7 @@ export function saveNotesToStorage() {
 
 export function saveCustomTagColorsToStorage() {
   localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(state.customTagColors));
+  markLocalDataChanged('tag-colors');
   if (window.Notidian && window.Notidian.mindMapInstance) {
     window.Notidian.mindMapInstance.updateData();
   }
@@ -249,6 +405,7 @@ export function saveCustomTagColorsToStorage() {
 export function saveLogsToStorage() {
   localStorage.setItem('notidian_focus_logs', JSON.stringify(state.focusLogs));
   localStorage.setItem('notidian_focus_log_sort', JSON.stringify(state.focusLogSort || { column: 'date', direction: 'desc' }));
+  markLocalDataChanged('focus-logs');
   if (window.Notidian && typeof window.Notidian.renderAnalytics === 'function') {
     window.Notidian.renderAnalytics();
   }
