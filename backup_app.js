@@ -693,6 +693,7 @@ function createBlockDOM(block, parentBlock = null) {
   const blockWrapper = document.createElement('div');
   blockWrapper.className = `block-wrapper block-${block.type}-wrapper`;
   blockWrapper.setAttribute('data-id', block.id);
+  blockWrapper.setAttribute('draggable', 'true');
 
   blockWrapper.addEventListener('click', (e) => {
     const isEditTarget = e.target.closest('.block-content, input, button, select');
@@ -1622,17 +1623,15 @@ function setupDragDropListeners() {
     const handle = wrapper.querySelector('.drag-handle');
     if (!handle) return;
 
-    // Only allow drag-start if hovering handle
-    handle.addEventListener('mouseenter', () => {
-      wrapper.setAttribute('draggable', 'true');
-    });
-    handle.addEventListener('mouseleave', () => {
-      if (!wrapper.classList.contains('dragging')) {
-        wrapper.removeAttribute('draggable');
-      }
-    });
-
     wrapper.addEventListener('dragstart', (e) => {
+      // ドラッグの起点がドラッグハンドル (.drag-handle) またはその子要素ではない場合、
+      // 即座にドラッグをキャンセルし、通常のテキスト選択・編集を優先させる
+      const isHandle = e.target.closest('.drag-handle');
+      if (!isHandle) {
+        e.preventDefault();
+        return;
+      }
+
       e.stopPropagation();
       const blockId = wrapper.getAttribute('data-id');
       state.draggedBlockId = blockId;
@@ -1658,7 +1657,6 @@ function setupDragDropListeners() {
 
     wrapper.addEventListener('dragend', () => {
       wrapper.classList.remove('dragging');
-      wrapper.removeAttribute('draggable');
       wrapper.style.opacity = '1';
       state.draggedBlockId = null;
       state.draggedBlockType = null; // キャッシュリセット
@@ -1718,7 +1716,24 @@ function setupDragDropListeners() {
         // 左端 30px 以内なら最優先で左カラム作成（ドラッグハンドル12pxを避けつつ十分狙える広さに設定）
         // ただし、上下の隙間（6px以内）を狙って行並べ替えをしている時は誤判定を防ぐため除外
         else if (x < 30 && y >= 6 && rect.height - y >= 6) {
-          resolvedLocation = 'left';
+          let isLeftmost = true;
+
+          // ホバー対象ブロックがカラム（column）の中にある場合、それが一番左の列（インデックス0）かどうかをチェック
+          if (found && found.parent && found.parent.type === 'column') {
+            const grandparent = findBlockAndParent(note.blocks, found.parent.id);
+            if (grandparent && grandparent.parent && grandparent.parent.type === 'columns') {
+              const columnsBlock = grandparent.parent;
+              const colIndex = columnsBlock.children.findIndex(c => c.id === found.parent.id);
+              if (colIndex > 0) {
+                // 左隣に別のカラムがあるので、このブロックでの左カラム作成は禁止（左隣ブロックの right に一元化）
+                isLeftmost = false;
+              }
+            }
+          }
+
+          if (isLeftmost) {
+            resolvedLocation = 'left';
+          }
         }
       }
 
@@ -1728,7 +1743,9 @@ function setupDragDropListeners() {
         const isToggleInside = found && found.block.type === 'toggle' && !isLeftRightAllowed && contentRect;
 
         if (isToggleInside) {
-          if (y < rect.height * 0.3) {
+          // 【超重要】トグル内のガタつきも完全解消：一番上のブロックの上部 30% のときだけ top、それ以外は常に inside に統一！
+          const isFirstBlock = found && found.index === 0 && (!found.parent || found.parent.type !== 'column');
+          if (isFirstBlock && y < rect.height * 0.3) {
             resolvedLocation = 'top';
           } else {
             resolvedLocation = 'inside';
