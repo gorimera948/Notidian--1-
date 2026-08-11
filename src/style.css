@@ -5402,23 +5402,15 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 
 @media (max-width: 760px) {
   .mobile-data-actions {
-    bottom: 14px;
-    display: flex;
-    gap: 8px;
-    left: 14px;
-    position: fixed;
-    right: 14px;
-    z-index: 12000;
+    display: none !important;
   }
 
   .mobile-data-action-btn {
-    display: inline-flex;
-    flex: 1 1 0;
-    justify-content: center;
+    display: none !important;
   }
 
   .editor-container {
-    padding: 20px 14px 80px 14px;
+    padding: 20px 14px 28px 14px;
   }
 
   .editor-toolbar {
@@ -5469,6 +5461,43 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 
   .btn-sync-action span {
     display: none;
+  }
+
+  .columns-container {
+    flex-direction: column !important;
+    gap: 12px !important;
+    padding-right: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+
+  .columns-container > .column-block {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+    padding: 12px 10px !important;
+  }
+
+  .column-block {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .column-resizer {
+    display: none !important;
+  }
+
+  .column-block .block-wrapper {
+    padding-left: 0 !important;
+  }
+
+  .column-block .block-content {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: normal;
   }
 }
 

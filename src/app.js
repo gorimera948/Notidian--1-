@@ -2566,7 +2566,6 @@ function initApp() {
   initFloatingToolbar(); // 追加
   initSlashMenuSortable();
   setupDragSelection();
-  initMobileDataActions();
 
   // Initialize MindMap
   mindMapInstance = new MindMap();
