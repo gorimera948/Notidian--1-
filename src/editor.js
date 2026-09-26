@@ -2389,24 +2389,11 @@ function selectSlashMenuItem() {
             { id: 'opt-complete', name: '完了', color: 'green' }
           ]
         },
-        {
-          id: 'col-tags', name: 'セレクトタグ', type: 'select', width: 140, options: [
-            { id: 'opt-tag-dev', name: '開発', color: 'purple' },
-            { id: 'opt-tag-design', name: 'デザイン', color: 'pink' },
-            { id: 'opt-tag-doc', name: '資料作成', color: 'yellow' }
-          ]
-        },
-        { id: 'col-date', name: '日付', type: 'date', width: 140 },
-        { id: 'col-number', name: '数値', type: 'number', width: 120, calc: 'sum' }
+        { id: 'col-tags', name: 'セレクトタグ', type: 'select', width: 140, options: [] }
       ],
-      rows: [
-        { 'col-title': 'ダッシュボードの設計', 'col-status': '進行中', 'col-tags': '開発', 'col-date': '2026-05-29', 'col-number': 8 },
-        { 'col-title': '仕様書の作成', 'col-status': '未着手', 'col-tags': '資料作成', 'col-date': '2026-05-30', 'col-number': 5 }
-      ],
+      rows: [],
       views: [
-        { id: 'view-all', name: 'すべて', filters: [] },
-        { id: 'view-progress', name: '進行中', filters: [{ id: 'f-progress', columnId: 'col-status', value: '進行中' }] },
-        { id: 'view-complete', name: '完了', filters: [{ id: 'f-complete', columnId: 'col-status', value: '完了' }] }
+        { id: 'view-all', name: 'すべて', filters: [] }
       ],
       activeViewId: 'view-all',
       groupBy: null,
