@@ -16,6 +16,20 @@ function renderNoteList() {
   }
 }
 
+function removeBlockById(blocks, targetId) {
+  if (!Array.isArray(blocks)) return [];
+  return blocks.filter(block => {
+    if (block.id === targetId) return false;
+    if (Array.isArray(block.children)) {
+      block.children = removeBlockById(block.children, targetId);
+    }
+    if (block.properties && Array.isArray(block.properties.children)) {
+      block.properties.children = removeBlockById(block.properties.children, targetId);
+    }
+    return true;
+  });
+}
+
 export function getStatusClass(val) {
   // val が ID（opt-xxx）か値そのものかどちらでも動くようにフォールバック
   if (val === '進行中' || val === 'opt-progress') return 'progress';
@@ -832,9 +846,13 @@ export function createDatabaseDOM(block) {
       const note = getActiveNote();
       if (!note) return;
       pushHistory();
-      note.blocks = note.blocks.filter(b => b.id !== block.id);
+      note.blocks = removeBlockById(note.blocks, block.id);
+      state.selectedBlockIds = (state.selectedBlockIds || []).filter(id => id !== block.id);
       saveNotesToStorage();
+      if (typeof window.clearTableSelection === 'function') window.clearTableSelection();
+      if (typeof window.clearBlockSelection === 'function') window.clearBlockSelection();
       renderEditor();
+      showToast('テーブルを削除しました');
     }
   });
   toolbar.appendChild(deleteDbBtn);
