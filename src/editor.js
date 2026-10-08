@@ -585,6 +585,50 @@ function setupColumnResizer(resizerEl, leftCol, rightCol, containerEl, columnsBl
   });
 }
 
+function readEditorImageFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error('No image file selected.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('Failed to read image file.'));
+    reader.onload = (event) => {
+      const originalDataUrl = event.target.result;
+
+      // SVG/GIF can lose important behavior when drawn to canvas, so keep them as-is.
+      if (file.type === 'image/svg+xml' || file.type === 'image/gif') {
+        resolve(originalDataUrl);
+        return;
+      }
+
+      const img = new Image();
+      img.onerror = () => resolve(originalDataUrl);
+      img.onload = () => {
+        const maxSide = 1600;
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+        if (scale >= 1 && file.size < 1200 * 1024) {
+          resolve(originalDataUrl);
+          return;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+        canvas.height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const mime = file.type === 'image/png' ? 'image/webp' : 'image/jpeg';
+        const compressed = canvas.toDataURL(mime, 0.82);
+        resolve(compressed || originalDataUrl);
+      };
+      img.src = originalDataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // Recursive function to create Block DOM
 export function createBlockDOM(block, parentBlock = null) {
   const blockWrapper = document.createElement('div');
@@ -752,25 +796,40 @@ export function createBlockDOM(block, parentBlock = null) {
       fileInput.addEventListener('change', (evt) => {
         const file = evt.target.files[0];
         if (file) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
+          readEditorImageFile(file).then((dataUrl) => {
             block.properties = block.properties || {};
-            block.properties.url = e.target.result;
+            block.properties.url = dataUrl;
             saveNotesToStorage();
             renderEditor();
-          };
-          reader.readAsDataURL(file);
+          }).catch((err) => {
+            console.error('Failed to insert image:', err);
+            showToast('画像の読み込みに失敗しました');
+          });
         }
       });
 
+      uploader.addEventListener('mousedown', (evt) => {
+        evt.stopPropagation();
+      });
+
       uploader.addEventListener('click', (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
         if (evt.target.closest('.image-url-input')) return;
         fileInput.click();
       });
 
       const urlInput = uploader.querySelector('.image-url-input');
+      urlInput.addEventListener('mousedown', (evt) => {
+        evt.stopPropagation();
+      });
+      urlInput.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+      });
       urlInput.addEventListener('keydown', (evt) => {
+        evt.stopPropagation();
         if (evt.key === 'Enter') {
+          evt.preventDefault();
           const val = urlInput.value.trim();
           if (val) {
             block.properties = block.properties || {};
@@ -789,7 +848,8 @@ export function createBlockDOM(block, parentBlock = null) {
       img.src = url;
       img.style = 'width: 100%; display: block; height: auto; border-radius: 6px; cursor: zoom-in;';
       img.title = 'クリックして拡大';
-      img.addEventListener('click', () => {
+      img.addEventListener('click', (evt) => {
+        evt.stopPropagation();
         showImageLightbox(url);
       });
       container.appendChild(img);
@@ -2343,6 +2403,7 @@ export function setupDragSelection() {
 function selectSlashMenuItem() {
   const activeLi = slashMenuList.querySelectorAll('li')[state.slashMenuActiveIndex];
   const newType = activeLi.getAttribute('data-type');
+  let focusAfterBlockId = null;
 
   const note = getActiveNote();
   if (!note) return;
@@ -2377,6 +2438,11 @@ function selectSlashMenuItem() {
   if (newType === 'image') {
     found.block.properties = { url: '', size: '100' };
     found.block.content = '';
+    if (found.parent && found.parent.type === 'toggle' && !found.parentArray[found.index + 1]) {
+      const nextBlock = { id: generateId(), type: 'p', content: '' };
+      found.parentArray.splice(found.index + 1, 0, nextBlock);
+      focusAfterBlockId = nextBlock.id;
+    }
   }
   if (newType === 'database') {
     found.block.properties = {
@@ -2408,6 +2474,11 @@ function selectSlashMenuItem() {
 
   // Focus back and place cursor at end
   setTimeout(() => {
+    if (focusAfterBlockId) {
+      const nextEl = document.querySelector(`.block-content[data-id="${focusAfterBlockId}"]`);
+      if (nextEl) focusBlock(nextEl);
+      return;
+    }
     // データベース、画像、区切り線の場合は非表示DOMとなりフォーカスできないため、処理をスキップ（ブラウザフリーズ防止）
     if (newType === 'database' || newType === 'image' || newType === 'divider') {
       return;
