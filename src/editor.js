@@ -596,9 +596,14 @@ function readEditorImageFile(file) {
     reader.onerror = () => reject(reader.error || new Error('Failed to read image file.'));
     reader.onload = (event) => {
       const originalDataUrl = event.target.result;
+      if (typeof originalDataUrl !== 'string' || !originalDataUrl) {
+        reject(new Error('Failed to read image file.'));
+        return;
+      }
 
-      // SVG/GIF can lose important behavior when drawn to canvas, so keep them as-is.
-      if (file.type === 'image/svg+xml' || file.type === 'image/gif') {
+      // Only compress browser-decodable bitmap formats. Keep others as-is so insertion does not fail.
+      const compressibleTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!compressibleTypes.includes(file.type)) {
         resolve(originalDataUrl);
         return;
       }
@@ -606,22 +611,33 @@ function readEditorImageFile(file) {
       const img = new Image();
       img.onerror = () => resolve(originalDataUrl);
       img.onload = () => {
-        const maxSide = 1600;
-        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
-        if (scale >= 1 && file.size < 1200 * 1024) {
+        try {
+          const width = img.naturalWidth || img.width;
+          const height = img.naturalHeight || img.height;
+          const maxSide = 1600;
+          const scale = Math.min(1, maxSide / Math.max(width, height));
+          if (scale >= 1 && file.size < 1200 * 1024) {
+            resolve(originalDataUrl);
+            return;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(originalDataUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+          const compressed = canvas.toDataURL(mime, 0.82);
+          resolve(compressed || originalDataUrl);
+        } catch (err) {
+          console.warn('Image compression skipped:', err);
           resolve(originalDataUrl);
-          return;
         }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
-        canvas.height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        const mime = file.type === 'image/png' ? 'image/webp' : 'image/jpeg';
-        const compressed = canvas.toDataURL(mime, 0.82);
-        resolve(compressed || originalDataUrl);
       };
       img.src = originalDataUrl;
     };
