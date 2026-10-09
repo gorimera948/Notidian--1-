@@ -585,100 +585,6 @@ function setupColumnResizer(resizerEl, leftCol, rightCol, containerEl, columnsBl
   });
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error('Failed to read image file.'));
-    reader.onload = (event) => {
-      const dataUrl = event.target.result;
-      if (typeof dataUrl === 'string' && dataUrl) {
-        resolve(dataUrl);
-      } else {
-        reject(new Error('Failed to read image file.'));
-      }
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-function compressImageDataUrl(dataUrl, maxSide = 1200, quality = 0.76) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onerror = () => resolve(dataUrl);
-    img.onload = () => {
-      try {
-        const width = img.naturalWidth || img.width;
-        const height = img.naturalHeight || img.height;
-        if (!width || !height) {
-          resolve(dataUrl);
-          return;
-        }
-
-        const scale = Math.min(1, maxSide / Math.max(width, height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(width * scale));
-        canvas.height = Math.max(1, Math.round(height * scale));
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(dataUrl);
-          return;
-        }
-
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', quality) || dataUrl);
-      } catch (err) {
-        console.warn('Image compression skipped:', err);
-        resolve(dataUrl);
-      }
-    };
-    img.src = dataUrl;
-  });
-}
-
-async function readEditorImageFile(file) {
-  if (!file) {
-    throw new Error('No image file selected.');
-  }
-
-  const originalDataUrl = await readFileAsDataUrl(file);
-  const compressibleTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  if (!compressibleTypes.includes(file.type)) {
-    return originalDataUrl;
-  }
-
-  let result = originalDataUrl;
-  if (file.size > 500 * 1024 || originalDataUrl.length > 700 * 1024) {
-    result = await compressImageDataUrl(originalDataUrl, 1200, 0.76);
-  }
-  if (result.length > 1300 * 1024) {
-    result = await compressImageDataUrl(result, 900, 0.68);
-  }
-  if (result.length > 1800 * 1024) {
-    result = await compressImageDataUrl(result, 700, 0.62);
-  }
-  return result;
-}
-
-async function saveImageBlockData(block, dataUrl) {
-  block.properties = block.properties || {};
-  block.properties.url = dataUrl;
-
-  try {
-    saveNotesToStorage();
-  } catch (err) {
-    if (dataUrl.startsWith('data:image/') && dataUrl.length > 800 * 1024) {
-      const smallerDataUrl = await compressImageDataUrl(dataUrl, 700, 0.58);
-      block.properties.url = smallerDataUrl;
-      saveNotesToStorage();
-      showToast('画像を軽量化して挿入しました');
-      return;
-    }
-    throw err;
-  }
-}
-
 // Recursive function to create Block DOM
 export function createBlockDOM(block, parentBlock = null) {
   const blockWrapper = document.createElement('div');
@@ -846,13 +752,18 @@ export function createBlockDOM(block, parentBlock = null) {
       fileInput.addEventListener('change', (evt) => {
         const file = evt.target.files[0];
         if (file) {
-          readEditorImageFile(file).then(async (dataUrl) => {
-            await saveImageBlockData(block, dataUrl);
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            block.properties = block.properties || {};
+            block.properties.url = e.target.result;
+            saveNotesToStorage();
             renderEditor();
-          }).catch((err) => {
+          };
+          reader.onerror = (err) => {
             console.error('Failed to insert image:', err);
-            showToast('画像が大きすぎるか、対応していない形式です');
-          });
+            showToast('画像の読み込みに失敗しました');
+          };
+          reader.readAsDataURL(file);
         }
       });
 
