@@ -755,9 +755,17 @@ export function createBlockDOM(block, parentBlock = null) {
           const reader = new FileReader();
           reader.onload = (e) => {
             block.properties = block.properties || {};
-            block.properties.url = e.target.result;
-            saveNotesToStorage();
-            renderEditor();
+            const previousUrl = block.properties.url || '';
+            try {
+              block.properties.url = e.target.result;
+              saveNotesToStorage();
+              renderEditor();
+            } catch (err) {
+              console.error('Failed to save inserted image:', err);
+              block.properties.url = previousUrl;
+              renderEditor();
+              showToast('容量が足りないため保存できません。小さい画像かURLを使ってください');
+            }
           };
           reader.onerror = (err) => {
             console.error('Failed to insert image:', err);
@@ -772,7 +780,6 @@ export function createBlockDOM(block, parentBlock = null) {
       });
 
       uploader.addEventListener('click', (evt) => {
-        evt.preventDefault();
         evt.stopPropagation();
         if (evt.target.closest('.image-url-input')) return;
         fileInput.click();
@@ -792,9 +799,17 @@ export function createBlockDOM(block, parentBlock = null) {
           const val = urlInput.value.trim();
           if (val) {
             block.properties = block.properties || {};
-            block.properties.url = val;
-            saveNotesToStorage();
-            renderEditor();
+            const previousUrl = block.properties.url || '';
+            try {
+              block.properties.url = val;
+              saveNotesToStorage();
+              renderEditor();
+            } catch (err) {
+              console.error('Failed to save image URL:', err);
+              block.properties.url = previousUrl;
+              renderEditor();
+              showToast('画像URLを保存できませんでした');
+            }
           }
         }
       });
