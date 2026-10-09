@@ -2,7 +2,12 @@ import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, hist
 import { generateId, escapeHTML } from './utils.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
 import { createDatabaseDOM, removeBlocksRecursively, updateBulkActionBar, updateBlockBulkActionBar } from './database.js';
-import { createDropboxSyncControls } from './sync.js';
+import {
+  createDropboxSyncControls,
+  getDropboxImageTemporaryLink,
+  isDropboxImageStorageAvailable,
+  uploadDropboxImageFile
+} from './sync.js';
 
 function renderNoteList() {
   if (window.Notidian && typeof window.Notidian.renderNoteList === 'function') {
@@ -14,6 +19,125 @@ function updateBacklinks() {
   if (window.Notidian && typeof window.Notidian.updateBacklinks === 'function') {
     window.Notidian.updateBacklinks();
   }
+}
+
+function cloneBlockProperties(block) {
+  return { ...(block.properties || {}) };
+}
+
+function restoreBlockProperties(block, previousProperties) {
+  block.properties = { ...previousProperties };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(event.target.result);
+    reader.onerror = () => reject(reader.error || new Error('Failed to read image file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveLocalImageFile(block, file) {
+  const previousProperties = cloneBlockProperties(block);
+
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    block.properties = {
+      ...previousProperties,
+      url: dataUrl
+    };
+    delete block.properties.dropboxPath;
+    delete block.properties.dropboxFileName;
+    delete block.properties.dropboxMimeType;
+    delete block.properties.dropboxSize;
+    delete block.properties.dropboxUploadedAt;
+    saveNotesToStorage();
+    renderEditor();
+  } catch (err) {
+    console.error('Failed to save inserted image:', err);
+    restoreBlockProperties(block, previousProperties);
+    renderEditor();
+    showToast('容量が足りないため保存できません。小さい画像かURLを使ってください');
+  }
+}
+
+async function saveDropboxImageFile(block, file) {
+  const previousProperties = cloneBlockProperties(block);
+  showToast('画像をDropboxへ保存中...');
+
+  try {
+    const storedImage = await uploadDropboxImageFile(file);
+    block.properties = {
+      ...previousProperties,
+      url: '',
+      dropboxPath: storedImage.path,
+      dropboxFileName: storedImage.fileName,
+      dropboxMimeType: storedImage.mimeType,
+      dropboxSize: storedImage.size,
+      dropboxUploadedAt: storedImage.uploadedAt
+    };
+    saveNotesToStorage();
+    renderEditor();
+    showToast('画像をDropboxに保存しました');
+  } catch (err) {
+    console.error('Failed to save Dropbox image:', err);
+    restoreBlockProperties(block, previousProperties);
+    renderEditor();
+    showToast('Dropboxへの画像保存に失敗しました');
+  }
+}
+
+function handleImageFileSelection(block, file) {
+  if (!file) return;
+  if (isDropboxImageStorageAvailable()) {
+    saveDropboxImageFile(block, file);
+  } else {
+    saveLocalImageFile(block, file);
+  }
+}
+
+function clearImageSourceProperties(block) {
+  block.properties = block.properties || {};
+  block.properties.url = '';
+  delete block.properties.dropboxPath;
+  delete block.properties.dropboxFileName;
+  delete block.properties.dropboxMimeType;
+  delete block.properties.dropboxSize;
+  delete block.properties.dropboxUploadedAt;
+}
+
+function applyDropboxImageSource(img, dropboxPath) {
+  let cancelled = false;
+  const load = async (forceRefresh = false) => {
+    try {
+      const link = await getDropboxImageTemporaryLink(dropboxPath, { forceRefresh });
+      if (cancelled || !img.isConnected) return;
+      img.src = link;
+      img.dataset.loadedUrl = link;
+      img.style.minHeight = '';
+    } catch (err) {
+      console.error('Failed to load Dropbox image:', err);
+      if (!cancelled && img.isConnected) {
+        img.alt = '画像の読み込みに失敗しました';
+        showToast('画像の読み込みに失敗しました');
+      }
+    }
+  };
+
+  img.dataset.dropboxPath = dropboxPath;
+  img.alt = 'Dropbox画像を読み込み中';
+  img.style.minHeight = '120px';
+  img.style.background = 'rgba(255,255,255,0.04)';
+  img.addEventListener('error', () => {
+    if (img.dataset.retryingDropboxImage === '1') return;
+    img.dataset.retryingDropboxImage = '1';
+    load(true);
+  });
+  load(false);
+  return () => {
+    cancelled = true;
+  };
 }
 
 export function focusBlock(el) {
@@ -732,8 +856,9 @@ export function createBlockDOM(block, parentBlock = null) {
     container.style = `position: relative; width: ${widthVal}%; max-width: 100%; margin: 8px 0; border-radius: 8px; overflow: visible; transition: width 0.2s ease;`;
 
     const url = block.properties?.url || '';
+    const dropboxPath = block.properties?.dropboxPath || '';
 
-    if (!url) {
+    if (!url && !dropboxPath) {
       // Image uploader UI
       const uploader = document.createElement('div');
       uploader.className = 'image-uploader';
@@ -751,28 +876,8 @@ export function createBlockDOM(block, parentBlock = null) {
 
       fileInput.addEventListener('change', (evt) => {
         const file = evt.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            block.properties = block.properties || {};
-            const previousUrl = block.properties.url || '';
-            try {
-              block.properties.url = e.target.result;
-              saveNotesToStorage();
-              renderEditor();
-            } catch (err) {
-              console.error('Failed to save inserted image:', err);
-              block.properties.url = previousUrl;
-              renderEditor();
-              showToast('容量が足りないため保存できません。小さい画像かURLを使ってください');
-            }
-          };
-          reader.onerror = (err) => {
-            console.error('Failed to insert image:', err);
-            showToast('画像の読み込みに失敗しました');
-          };
-          reader.readAsDataURL(file);
-        }
+        evt.target.value = '';
+        handleImageFileSelection(block, file);
       });
 
       uploader.addEventListener('mousedown', (evt) => {
@@ -802,6 +907,11 @@ export function createBlockDOM(block, parentBlock = null) {
             const previousUrl = block.properties.url || '';
             try {
               block.properties.url = val;
+              delete block.properties.dropboxPath;
+              delete block.properties.dropboxFileName;
+              delete block.properties.dropboxMimeType;
+              delete block.properties.dropboxSize;
+              delete block.properties.dropboxUploadedAt;
               saveNotesToStorage();
               renderEditor();
             } catch (err) {
@@ -819,12 +929,22 @@ export function createBlockDOM(block, parentBlock = null) {
     } else {
       // Render image with controls
       const img = document.createElement('img');
-      img.src = url;
       img.style = 'width: 100%; display: block; height: auto; border-radius: 6px; cursor: zoom-in;';
       img.title = 'クリックして拡大';
+      if (url) {
+        img.src = url;
+        img.dataset.loadedUrl = url;
+      } else {
+        applyDropboxImageSource(img, dropboxPath);
+      }
       img.addEventListener('click', (evt) => {
         evt.stopPropagation();
-        showImageLightbox(url);
+        const displayUrl = img.dataset.loadedUrl || img.src;
+        if (displayUrl) {
+          showImageLightbox(displayUrl);
+        } else {
+          showToast('画像を読み込み中です');
+        }
       });
       container.appendChild(img);
 
@@ -917,8 +1037,7 @@ export function createBlockDOM(block, parentBlock = null) {
       changeBtn.style = 'background: rgba(13,17,28,0.85); color: #fff; border: 1px solid var(--border-light); border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; display: flex; align-items: center; gap: 4px;';
       changeBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> 変更';
       changeBtn.addEventListener('click', () => {
-        block.properties = block.properties || {};
-        block.properties.url = '';
+        clearImageSourceProperties(block);
         saveNotesToStorage();
         renderEditor();
       });
