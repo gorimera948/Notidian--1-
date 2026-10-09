@@ -17,6 +17,8 @@ const PKCE_VERIFIER_KEY = 'notidian_dropbox_pkce_verifier';
 const OAUTH_STATE_KEY = 'notidian_dropbox_oauth_state';
 const DEBOUNCE_MS = 3500;
 const SCOPES = ['files.content.read', 'files.content.write'];
+const IMAGE_DIR = '/images';
+const IMAGE_LINK_TTL_MS = 3 * 60 * 60 * 1000;
 
 const syncState = {
   status: APP_KEY ? 'disconnected' : 'unconfigured',
@@ -32,6 +34,7 @@ let initialized = false;
 let applyingRemote = false;
 let syncInFlight = null;
 let remoteRev = localStorage.getItem(REMOTE_REV_KEY) || '';
+const imageLinkCache = new Map();
 
 function getRedirectUri() {
   return `${window.location.origin}${window.location.pathname}`;
@@ -73,6 +76,50 @@ function isDropboxNotFound(err) {
 
 function isDropboxConflict(err) {
   return err && err.status === 409 && !isDropboxNotFound(err);
+}
+
+function hasDropboxRefreshToken() {
+  return Boolean(localStorage.getItem(REFRESH_TOKEN_KEY));
+}
+
+function ensureDropboxImageClient() {
+  if (!APP_KEY) {
+    throw new Error('Dropbox App Key is missing.');
+  }
+  if (!client) {
+    createAuth();
+  }
+  if (!hasDropboxRefreshToken()) {
+    throw new Error('Dropbox is not connected.');
+  }
+  return client;
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function getDropboxDateFolder(date = new Date()) {
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate())
+  ].join('-');
+}
+
+function sanitizeDropboxFileName(fileName) {
+  const fallback = `image-${Date.now()}`;
+  const cleanName = String(fileName || fallback)
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleanName || fallback;
+}
+
+function createDropboxImagePath(file) {
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  const fileName = sanitizeDropboxFileName(file && file.name);
+  return `${IMAGE_DIR}/${getDropboxDateFolder()}/${Date.now()}-${randomPart}-${fileName}`;
 }
 
 function getSnapshotUpdatedAt(snapshot) {
@@ -370,6 +417,62 @@ export function isApplyingRemote() {
   return applyingRemote;
 }
 
+export function isDropboxImageStorageAvailable() {
+  return Boolean(APP_KEY && hasDropboxRefreshToken());
+}
+
+export async function uploadDropboxImageFile(file) {
+  if (!file) {
+    throw new Error('Image file is missing.');
+  }
+
+  const dbx = ensureDropboxImageClient();
+  const requestedPath = createDropboxImagePath(file);
+  const response = await dbx.filesUpload({
+    path: requestedPath,
+    mode: { '.tag': 'add' },
+    autorename: true,
+    mute: true,
+    contents: file
+  });
+  const result = unwrap(response);
+  const storedPath = result.path_lower || result.path_display || requestedPath;
+  imageLinkCache.delete(storedPath);
+
+  return {
+    path: storedPath,
+    fileName: file.name || '',
+    mimeType: file.type || 'application/octet-stream',
+    size: Number(file.size) || 0,
+    uploadedAt: Date.now()
+  };
+}
+
+export async function getDropboxImageTemporaryLink(path, options = {}) {
+  if (!path) {
+    throw new Error('Dropbox image path is missing.');
+  }
+
+  const cacheKey = String(path);
+  const cached = imageLinkCache.get(cacheKey);
+  if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.link;
+  }
+
+  const dbx = ensureDropboxImageClient();
+  const response = await dbx.filesGetTemporaryLink({ path: cacheKey });
+  const result = unwrap(response);
+  if (!result.link) {
+    throw new Error('Dropbox temporary image link was missing.');
+  }
+
+  imageLinkCache.set(cacheKey, {
+    link: result.link,
+    expiresAt: Date.now() + IMAGE_LINK_TTL_MS
+  });
+  return result.link;
+}
+
 export function createDropboxSyncControls() {
   const wrapper = document.createElement('div');
   wrapper.className = 'notidian-sync-controls';
@@ -444,7 +547,10 @@ export async function initDropboxSync() {
     scheduleDropboxSync,
     getDropboxSyncState,
     isApplyingRemote,
-    getDropboxSetupInfo
+    getDropboxSetupInfo,
+    isDropboxImageStorageAvailable,
+    uploadDropboxImageFile,
+    getDropboxImageTemporaryLink
   };
 
   window.addEventListener('notidian:data-changed', scheduleDropboxSync);
