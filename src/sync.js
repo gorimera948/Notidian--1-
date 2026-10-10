@@ -8,6 +8,7 @@ import {
 import { showToast } from './utils.js';
 
 const APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY || '';
+const CONFIGURED_REDIRECT_URI = import.meta.env.VITE_DROPBOX_REDIRECT_URI || '';
 const SYNC_PATH = '/notidian-sync.json';
 const REFRESH_TOKEN_KEY = 'notidian_dropbox_refresh_token';
 const ACCESS_TOKEN_KEY = 'notidian_dropbox_access_token';
@@ -37,6 +38,15 @@ let remoteRev = localStorage.getItem(REMOTE_REV_KEY) || '';
 const imageLinkCache = new Map();
 
 function getRedirectUri() {
+  if (CONFIGURED_REDIRECT_URI) return CONFIGURED_REDIRECT_URI;
+
+  if (
+    window.location.origin === 'https://gorimera948.github.io' &&
+    window.location.pathname.startsWith('/Notidian--1-')
+  ) {
+    return 'https://gorimera948.github.io/Notidian--1-/';
+  }
+
   return `${window.location.origin}${window.location.pathname}`;
 }
 
