@@ -21,6 +21,9 @@ function updateBacklinks() {
   }
 }
 
+const LOCAL_IMAGE_FALLBACK_MAX_BYTES = 1.5 * 1024 * 1024;
+const DROPBOX_IMAGE_UPLOAD_TIMEOUT_MS = 45000;
+
 function cloneBlockProperties(block) {
   return { ...(block.properties || {}) };
 }
@@ -38,8 +41,22 @@ function readFileAsDataUrl(file) {
   });
 }
 
-async function saveLocalImageFile(block, file) {
-  const previousProperties = cloneBlockProperties(block);
+function withTimeout(promise, ms, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function canFallbackToLocalImage(file) {
+  return Number(file && file.size) <= LOCAL_IMAGE_FALLBACK_MAX_BYTES;
+}
+
+async function saveLocalImageFile(block, file, options = {}) {
+  const previousProperties = options.previousProperties
+    ? { ...options.previousProperties }
+    : cloneBlockProperties(block);
 
   try {
     const dataUrl = await readFileAsDataUrl(file);
@@ -54,11 +71,14 @@ async function saveLocalImageFile(block, file) {
     delete block.properties.dropboxUploadedAt;
     saveNotesToStorage();
     renderEditor();
+    if (options.successMessage) showToast(options.successMessage);
+    return true;
   } catch (err) {
     console.error('Failed to save inserted image:', err);
     restoreBlockProperties(block, previousProperties);
     renderEditor();
-    showToast('容量が足りないため保存できません。小さい画像かURLを使ってください');
+    showToast(options.failureMessage || '容量が足りないため保存できません。小さい画像かURLを使ってください');
+    return false;
   }
 }
 
@@ -67,7 +87,11 @@ async function saveDropboxImageFile(block, file) {
   showToast('画像をDropboxへ保存中...');
 
   try {
-    const storedImage = await uploadDropboxImageFile(file);
+    const storedImage = await withTimeout(
+      uploadDropboxImageFile(file),
+      DROPBOX_IMAGE_UPLOAD_TIMEOUT_MS,
+      'Dropbox image upload timed out.'
+    );
     block.properties = {
       ...previousProperties,
       url: '',
@@ -83,8 +107,18 @@ async function saveDropboxImageFile(block, file) {
   } catch (err) {
     console.error('Failed to save Dropbox image:', err);
     restoreBlockProperties(block, previousProperties);
+
+    if (canFallbackToLocalImage(file)) {
+      await saveLocalImageFile(block, file, {
+        previousProperties,
+        successMessage: 'Dropbox保存に失敗したためローカルに保存しました',
+        failureMessage: 'Dropbox保存に失敗し、ローカル容量も足りません。接続を確認するか小さい画像を使ってください'
+      });
+      return;
+    }
+
     renderEditor();
-    showToast('Dropboxへの画像保存に失敗しました');
+    showToast('Dropboxへ保存できません。接続を確認するか小さい画像を使ってください');
   }
 }
 
@@ -903,10 +937,12 @@ export function createBlockDOM(block, parentBlock = null) {
           evt.preventDefault();
           const val = urlInput.value.trim();
           if (val) {
-            block.properties = block.properties || {};
-            const previousUrl = block.properties.url || '';
+            const previousProperties = cloneBlockProperties(block);
             try {
-              block.properties.url = val;
+              block.properties = {
+                ...previousProperties,
+                url: val
+              };
               delete block.properties.dropboxPath;
               delete block.properties.dropboxFileName;
               delete block.properties.dropboxMimeType;
@@ -916,7 +952,7 @@ export function createBlockDOM(block, parentBlock = null) {
               renderEditor();
             } catch (err) {
               console.error('Failed to save image URL:', err);
-              block.properties.url = previousUrl;
+              restoreBlockProperties(block, previousProperties);
               renderEditor();
               showToast('画像URLを保存できませんでした');
             }
