@@ -77,7 +77,10 @@ async function saveLocalImageFile(block, file, options = {}) {
     console.error('Failed to save inserted image:', err);
     restoreBlockProperties(block, previousProperties);
     renderEditor();
-    showToast(options.failureMessage || '容量が足りないため保存できません。小さい画像かURLを使ってください');
+    showToast(
+      options.failureMessage || '画像を保存できません。Dropbox未接続なら接続してください。ローカル保存はブラウザ容量不足の可能性があります。',
+      7000
+    );
     return false;
   }
 }
@@ -112,13 +115,13 @@ async function saveDropboxImageFile(block, file) {
       await saveLocalImageFile(block, file, {
         previousProperties,
         successMessage: 'Dropbox保存に失敗したためローカルに保存しました',
-        failureMessage: 'Dropbox保存に失敗し、ローカル容量も足りません。接続を確認するか小さい画像を使ってください'
+        failureMessage: 'Dropbox保存に失敗し、ローカル容量も足りません。Dropbox接続を確認するか画像URLを使ってください'
       });
       return;
     }
 
     renderEditor();
-    showToast('Dropboxへ保存できません。接続を確認するか小さい画像を使ってください');
+    showToast('Dropboxへ保存できません。Dropbox接続を確認するか画像URLを使ってください', 7000);
   }
 }
 
@@ -127,7 +130,9 @@ function handleImageFileSelection(block, file) {
   if (isDropboxImageStorageAvailable()) {
     saveDropboxImageFile(block, file);
   } else {
-    saveLocalImageFile(block, file);
+    saveLocalImageFile(block, file, {
+      failureMessage: 'Dropbox未接続のためローカル保存しようとしましたが、ブラウザ容量が足りません。Dropboxに接続するか画像URLを使ってください'
+    });
   }
 }
 
@@ -2964,27 +2969,28 @@ export function setupBlockCopyPasteShortcuts() {
   });
 }
 
-function showToast(msg) {
+function showToast(msg, durationMs) {
   const existing = document.getElementById('notidian-toast');
   if (existing) existing.remove();
 
+  const duration = durationMs || (String(msg).length > 22 ? 5500 : 3000);
   const toast = document.createElement('div');
   toast.id = 'notidian-toast';
-  toast.style = 'position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(13, 17, 28, 0.9); color: #fff; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; border: 1px solid var(--accent-primary); box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 10000; animation: toastFade 2s forwards;';
+  toast.style = `position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); max-width: min(92vw, 560px); white-space: normal; line-height: 1.5; background: rgba(13, 17, 28, 0.94); color: #fff; padding: 10px 16px; border-radius: 14px; font-size: 12px; font-weight: 600; border: 1px solid var(--accent-primary); box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 10000; animation: toastFade ${duration}ms forwards;`;
   toast.textContent = msg;
 
   const style = document.createElement('style');
   style.innerHTML = `
     @keyframes toastFade {
       0% { opacity: 0; bottom: 70px; }
-      15% { opacity: 1; bottom: 80px; }
-      85% { opacity: 1; }
+      12% { opacity: 1; bottom: 80px; }
+      88% { opacity: 1; bottom: 80px; }
       100% { opacity: 0; bottom: 85px; }
     }
   `;
   document.head.appendChild(style);
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 2000);
+  setTimeout(() => toast.remove(), duration);
 }
 
 // 【統合データ完全性エンジン】実在しないノートへの古いWikiリンクを自動解除（プレーンテキスト化）し、空のタグをクリーンアップ
