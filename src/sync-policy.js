@@ -1,4 +1,5 @@
 import { sampleNotes } from './sample-notes.js';
+import { DEFAULT_POMODORO_SETS } from './pomodoro-defaults.js';
 
 function canonicalJSON(value, ignored = new Set()) {
   return JSON.stringify(value, (key, item) => {
@@ -52,6 +53,10 @@ export function isInitialSnapshot(snapshot) {
     folders.length === 0 && focusLogs.length === 0 &&
     Object.keys(customTagColors || {}).length === 0 &&
     !(pomodoro?.presets || []).length &&
+    (!(pomodoro?.sets || []).length || canonicalJSON(pomodoro.sets) === canonicalJSON(DEFAULT_POMODORO_SETS)) &&
+    (!(pomodoro?.schedule || []).length || canonicalJSON(pomodoro.schedule) === canonicalJSON([DEFAULT_POMODORO_SETS[0]])) &&
+    (pomodoro?.timerVolume === undefined || Number(pomodoro.timerVolume) === 0.5) &&
+    !snapshot.data.timerTargetTableName &&
     ['initial', 'pomodoro'].includes(snapshot.syncMeta?.source);
 }
 

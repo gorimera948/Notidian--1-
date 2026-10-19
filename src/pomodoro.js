@@ -1,5 +1,6 @@
 import { state, saveLogsToStorage, saveNotesToStorage, getActiveNote, markLocalDataChanged } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
+import { DEFAULT_POMODORO_SETS } from './pomodoro-defaults.js';
 import { insertPomodoroStartToActiveTable, insertPomodoroLogToActiveNoteDb } from './database.js';
 
 export let sets = [];
@@ -58,11 +59,7 @@ export function loadPomodoroData() {
 
   // Prepopulate standard Pomodoro configurations if completely empty
   if (!Array.isArray(sets) || sets.length === 0) {
-    sets = [
-      { name: '作業セッション (25分)', work: 25 * 60 * 1000, rest: 5 * 60 * 1000 },
-      { name: 'ショートブレイク (5分)', work: 5 * 60 * 1000, rest: 3 * 60 * 1000 },
-      { name: 'テスト用 (10秒)', work: 10 * 1000, rest: 5 * 1000 }
-    ];
+    sets = structuredClone(DEFAULT_POMODORO_SETS);
     savePomodoroData(false);
   }
 

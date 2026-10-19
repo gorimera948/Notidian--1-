@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { DEFAULT_POMODORO_SETS } from '../src/pomodoro-defaults.js';
 
 test('initial metadata preserves zero rather than stamping the opening time', async () => {
   const storage = new Map();
@@ -17,6 +18,7 @@ test('opening a new device initializes timers without marking the data newer', a
   const storage = new Map();
   let changes = 0;
   const context = vm.createContext({
+    DEFAULT_POMODORO_SETS, structuredClone,
     localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)) },
     markLocalDataChanged: () => changes++, console
   });

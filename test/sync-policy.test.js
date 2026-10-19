@@ -56,6 +56,12 @@ test('edited sample notes are protected even if the last change was a timer edit
   assert.equal(chooseSyncAction(phone, snapshot(100)), 'conflict');
 });
 
+test('custom timer settings on a device with sample notes are preserved', () => {
+  const phone = initial();
+  phone.data.pomodoro = { sets: [{ name: 'My session', work: 600000, rest: 300000 }] };
+  assert.equal(chooseSyncAction(phone, snapshot(100)), 'conflict');
+});
+
 test('newer and larger content syncs in either direction; old large content does not win', () => {
   const older = snapshot(100, 'メモ');
   const newer = snapshot(200, '追記した日本語のメモ');
