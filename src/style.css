@@ -5366,6 +5366,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 }
 
 .notidian-sync-controls[data-status="error"] .notidian-sync-status,
+.notidian-sync-controls[data-status="protected"] .notidian-sync-status,
 .notidian-sync-controls[data-status="offline"] .notidian-sync-status,
 .notidian-sync-controls[data-status="unconfigured"] .notidian-sync-status {
   color: #f87171;

@@ -53,7 +53,7 @@ export function loadPomodoroData() {
     if (schedule.length !== originalLength) needsSave = true;
   }
   if (needsSave) {
-    savePomodoroData();
+    savePomodoroData(false);
   }
 
   // Prepopulate standard Pomodoro configurations if completely empty
@@ -63,21 +63,21 @@ export function loadPomodoroData() {
       { name: 'ショートブレイク (5分)', work: 5 * 60 * 1000, rest: 3 * 60 * 1000 },
       { name: 'テスト用 (10秒)', work: 10 * 1000, rest: 5 * 1000 }
     ];
-    savePomodoroData();
+    savePomodoroData(false);
   }
 
   if (!Array.isArray(schedule) || schedule.length === 0) {
     schedule = [sets[0]];
-    savePomodoroData();
+    savePomodoroData(false);
   }
 }
 
-export function savePomodoroData() {
+export function savePomodoroData(markChanged = true) {
   localStorage.setItem("pomodoro_sets", JSON.stringify(sets));
   localStorage.setItem("pomodoro_schedule", JSON.stringify(schedule));
   localStorage.setItem("pomodoro_presets", JSON.stringify(presets));
   localStorage.setItem("pomodoro_standalone_volume", timerVolume);
-  markLocalDataChanged('pomodoro');
+  if (markChanged) markLocalDataChanged('pomodoro');
 }
 
 export function setTimerVolume(val) {

@@ -6,6 +6,7 @@ import {
   setLocalSyncMeta
 } from './state.js';
 import { showToast } from './utils.js';
+import { synchronizeSnapshots, validateSnapshot } from './sync-policy.js';
 
 const APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY || '';
 const CONFIGURED_REDIRECT_URI = import.meta.env.VITE_DROPBOX_REDIRECT_URI || '';
@@ -34,6 +35,7 @@ let debounceTimer = null;
 let initialized = false;
 let applyingRemote = false;
 let syncInFlight = null;
+let resyncRequested = false;
 let remoteRev = localStorage.getItem(REMOTE_REV_KEY) || '';
 const imageLinkCache = new Map();
 
@@ -130,10 +132,6 @@ function createDropboxImagePath(file) {
   const randomPart = Math.random().toString(36).slice(2, 8);
   const fileName = sanitizeDropboxFileName(file && file.name);
   return `${IMAGE_DIR}/${getDropboxDateFolder()}/${Date.now()}-${randomPart}-${fileName}`;
-}
-
-function getSnapshotUpdatedAt(snapshot) {
-  return Number(snapshot && snapshot.syncMeta && snapshot.syncMeta.updatedAt) || 0;
 }
 
 function estimateSnapshotUpdatedAt(snapshot) {
@@ -264,25 +262,25 @@ async function handleOAuthReturn() {
 async function downloadRemoteSnapshot() {
   const response = await client.filesDownload({ path: SYNC_PATH });
   const result = unwrap(response);
-  remoteRev = result.rev || '';
-  if (remoteRev) localStorage.setItem(REMOTE_REV_KEY, remoteRev);
-
   const blob = result.fileBlob || new Blob([result.fileBinary]);
   const text = await blob.text();
-  return JSON.parse(text);
+  const snapshot = validateSnapshot(JSON.parse(text));
+  if (!result.rev) throw new Error('Dropbox sync revision is missing.');
+  remoteRev = result.rev;
+  return { snapshot, rev: remoteRev };
 }
 
-async function uploadLocalSnapshot(expectedRev = remoteRev) {
-  const snapshot = createNotidianSnapshot();
+async function uploadLocalSnapshot(snapshot, expectedRev) {
   const contents = JSON.stringify(snapshot, null, 2);
   const mode = expectedRev
     ? { '.tag': 'update', update: expectedRev }
-    : { '.tag': 'overwrite' };
+    : { '.tag': 'add' };
 
   const response = await client.filesUpload({
     path: SYNC_PATH,
     mode,
     autorename: false,
+    strict_conflict: true,
     mute: true,
     contents
   });
@@ -290,6 +288,18 @@ async function uploadLocalSnapshot(expectedRev = remoteRev) {
   remoteRev = result.rev || '';
   if (remoteRev) localStorage.setItem(REMOTE_REV_KEY, remoteRev);
   return result;
+}
+
+async function backupSnapshot(snapshot) {
+  // Keep backups in Dropbox rather than doubling the browser's storage quota.
+  const deviceId = String(localStorage.getItem('notidian_client_id') || 'device').replace(/[^a-zA-Z0-9_-]/g, '_');
+  await client.filesUpload({
+    path: `/backups/notidian-sync/${deviceId}-before-sync.json`,
+    mode: { '.tag': 'overwrite' },
+    autorename: false,
+    mute: true,
+    contents: JSON.stringify(snapshot, null, 2)
+  });
 }
 
 async function applyRemoteSnapshot(snapshot) {
@@ -300,20 +310,6 @@ async function applyRemoteSnapshot(snapshot) {
   } finally {
     applyingRemote = false;
   }
-}
-
-async function resolveConflictWithLatestWins(localSnapshot) {
-  const remoteSnapshot = await downloadRemoteSnapshot();
-  const localUpdatedAt = getSnapshotUpdatedAt(localSnapshot);
-  const remoteUpdatedAt = getSnapshotUpdatedAt(remoteSnapshot);
-
-  if (remoteUpdatedAt > localUpdatedAt) {
-    await applyRemoteSnapshot(remoteSnapshot);
-    return 'remote';
-  }
-
-  await uploadLocalSnapshot(remoteRev);
-  return 'local';
 }
 
 export async function connectDropbox() {
@@ -364,37 +360,43 @@ export async function syncNow(options = {}) {
     setSyncState({ status: 'disconnected', connected: false, message: 'Dropbox disconnected.' });
     return;
   }
-  if (syncInFlight) return syncInFlight;
+  if (syncInFlight) {
+    resyncRequested = true;
+    return syncInFlight;
+  }
+  clearTimeout(debounceTimer);
 
   syncInFlight = (async () => {
     setSyncState({ status: 'syncing', connected: true, message: 'Syncing with Dropbox...' });
 
-    const localSnapshot = createNotidianSnapshot();
-    const localUpdatedAt = getSnapshotUpdatedAt(localSnapshot);
-
     try {
-      let remoteSnapshot = null;
-      try {
-        remoteSnapshot = await downloadRemoteSnapshot();
-      } catch (err) {
-        if (!isDropboxNotFound(err)) throw err;
-      }
-
-      if (!remoteSnapshot) {
-        await uploadLocalSnapshot('');
-      } else {
-        const remoteUpdatedAt = getSnapshotUpdatedAt(remoteSnapshot);
-        if (remoteUpdatedAt > localUpdatedAt) {
-          await applyRemoteSnapshot(remoteSnapshot);
-        } else if (localUpdatedAt > remoteUpdatedAt || options.reason === 'manual') {
+      const outcome = await synchronizeSnapshots({
+        readRemote: async () => {
           try {
-            await uploadLocalSnapshot(remoteRev);
+            return await downloadRemoteSnapshot();
           } catch (err) {
-            if (!isDropboxConflict(err)) throw err;
-            await resolveConflictWithLatestWins(localSnapshot);
+            if (!isDropboxNotFound(err)) throw err;
+            return { snapshot: null, rev: '' };
           }
-        }
+        },
+        readLocal: createNotidianSnapshot,
+        backup: backupSnapshot,
+        upload: uploadLocalSnapshot,
+        apply: applyRemoteSnapshot,
+        isConflict: isDropboxConflict
+      });
+      if (outcome === 'conflict') {
+        setSyncState({
+          status: 'protected', connected: true,
+          message: 'データ保護中：更新日時とデータ量が一致しないため、上書きを停止しました'
+        });
+        return;
       }
+      if (outcome === 'retry') {
+        resyncRequested = true;
+        return;
+      }
+      if (remoteRev) localStorage.setItem(REMOTE_REV_KEY, remoteRev);
 
       const now = Date.now();
       setSyncState({ status: 'synced', connected: true, message: 'Synced', lastSyncedAt: now });
@@ -404,6 +406,10 @@ export async function syncNow(options = {}) {
       console.error('Dropbox sync failed:', err);
     } finally {
       syncInFlight = null;
+      if (resyncRequested) {
+        resyncRequested = false;
+        scheduleDropboxSync();
+      }
     }
   })();
 
@@ -413,6 +419,10 @@ export async function syncNow(options = {}) {
 export function scheduleDropboxSync() {
   if (!initialized || !localStorage.getItem(REFRESH_TOKEN_KEY) || applyingRemote) return;
   clearTimeout(debounceTimer);
+  if (syncInFlight) {
+    resyncRequested = true;
+    return;
+  }
   setSyncState({ status: 'pending', connected: true, message: 'Waiting to sync...' });
   debounceTimer = setTimeout(() => {
     syncNow({ reason: 'debounce' });
