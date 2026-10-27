@@ -29,3 +29,34 @@ test('opening a new device initializes timers without marking the data newer', a
   vm.runInContext('setTimerVolume(0.7)', context);
   assert.equal(changes, 1);
 });
+
+test('a storage quota error rolls back all snapshot keys and leaves in-memory notes intact', async () => {
+  const original = [{ id: 'old', title: 'old', blocks: [] }];
+  const storage = new Map([['notidian_notes', JSON.stringify(original)], ['notidian_folders', '[]']]);
+  const before = new Map(storage);
+  let fail = true;
+  globalThis.localStorage = {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => {
+      if (key === 'notidian_focus_logs' && fail) { fail = false; throw new Error('Quota exceeded'); }
+      storage.set(key, String(value));
+    }, removeItem: key => storage.delete(key)
+  };
+  const { state, applyNotidianSnapshot } = await import('../src/state.js');
+  state.notes = original;
+  assert.throws(() => applyNotidianSnapshot({ data: {
+    notes: [{ id: 'new', blocks: [] }], folders: [{ id: 'folder' }], focusLogs: []
+  } }), /Quota exceeded/);
+  assert.deepEqual(storage, before); assert.equal(state.notes, original);
+});
+
+test('stored empty notes stay empty, while a new device still gets welcome notes', async () => {
+  const storage = new Map([['notidian_notes', '[]'], ['notidian_focus_logs', '[]']]);
+  globalThis.localStorage = { getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, String(value)) };
+  globalThis.window = {};
+  const { state, initStorage } = await import('../src/state.js');
+  initStorage(); assert.equal(state.notes.length, 0);
+  storage.delete('notidian_notes'); initStorage();
+  assert.equal(state.notes.length, 3);
+});

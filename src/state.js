@@ -109,6 +109,7 @@ export function createNotidianSnapshot() {
     app: 'notidian',
     schemaVersion: 1,
     syncMeta: getLocalSyncMeta(),
+    syncTombstones: parseStorageJSON('notidian_sync_tombstones', {}),
     data: {
       notes: state.notes || [],
       folders: state.folders || [],
@@ -140,44 +141,41 @@ export function applyNotidianSnapshot(snapshotOrData, options = {}) {
   if (!Array.isArray(data.notes)) {
     throw new Error('Invalid Notidian snapshot: notes must be an array.');
   }
-
-  if (data.notes) {
-    localStorage.setItem('notidian_notes', JSON.stringify(data.notes));
-    state.notes = data.notes;
-  }
-  if (data.folders) {
-    localStorage.setItem('notidian_folders', JSON.stringify(data.folders));
-    state.folders = data.folders;
-  }
-  if (data.collapsedFolders) {
-    localStorage.setItem('notidian_collapsed_folders', JSON.stringify(data.collapsedFolders));
-    state.collapsedFolders = data.collapsedFolders;
-  }
-  if (data.dailyFolderId !== undefined) {
-    localStorage.setItem('notidian_daily_folder_id', data.dailyFolderId || '');
-    state.dailyFolderId = data.dailyFolderId || null;
-  }
-  if (data.focusLogs) {
-    localStorage.setItem('notidian_focus_logs', JSON.stringify(data.focusLogs));
-    state.focusLogs = data.focusLogs;
-  }
-  if (data.focusLogSort) {
-    localStorage.setItem('notidian_focus_log_sort', JSON.stringify(data.focusLogSort));
-    state.focusLogSort = data.focusLogSort;
-  }
-  if (data.customTagColors) {
-    localStorage.setItem('notidian_custom_tag_colors', JSON.stringify(data.customTagColors));
-    state.customTagColors = data.customTagColors;
-  }
+  const writes = new Map([
+    ['notidian_notes', JSON.stringify(data.notes)],
+    ['notidian_sync_tombstones', JSON.stringify(snapshotOrData.syncTombstones || {})]
+  ]);
+  for (const [field, key] of Object.entries({
+    folders: 'notidian_folders', collapsedFolders: 'notidian_collapsed_folders',
+    focusLogs: 'notidian_focus_logs', focusLogSort: 'notidian_focus_log_sort',
+    customTagColors: 'notidian_custom_tag_colors'
+  })) if (data[field] !== undefined) writes.set(key, JSON.stringify(data[field]));
+  if (data.dailyFolderId !== undefined) writes.set('notidian_daily_folder_id', data.dailyFolderId || '');
+  if (data.timerTargetTableName !== undefined) writes.set('timer_target_table_name', data.timerTargetTableName || '');
   if (data.pomodoro) {
-    localStorage.setItem('pomodoro_sets', JSON.stringify(data.pomodoro.sets || []));
-    localStorage.setItem('pomodoro_schedule', JSON.stringify(data.pomodoro.schedule || []));
-    localStorage.setItem('pomodoro_presets', JSON.stringify(data.pomodoro.presets || []));
-    localStorage.setItem('pomodoro_standalone_volume', data.pomodoro.timerVolume ?? 0.5);
+    writes.set('pomodoro_sets', JSON.stringify(data.pomodoro.sets || []));
+    writes.set('pomodoro_schedule', JSON.stringify(data.pomodoro.schedule || []));
+    writes.set('pomodoro_presets', JSON.stringify(data.pomodoro.presets || []));
+    writes.set('pomodoro_standalone_volume', String(data.pomodoro.timerVolume ?? 0.5));
   }
-  if (data.timerTargetTableName !== undefined) {
-    localStorage.setItem('timer_target_table_name', data.timerTargetTableName || '');
+  const previous = new Map([...writes.keys()].map(key => [key, localStorage.getItem(key)]));
+  const written = [];
+  try {
+    for (const [key, value] of writes) { localStorage.setItem(key, value); written.push(key); }
+  } catch (err) {
+    // Do not leave half of a larger merged notebook applied after a quota error.
+    for (const key of written.reverse()) {
+      const value = previous.get(key);
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    }
+    throw err;
   }
+  state.notes = data.notes;
+  for (const field of ['folders', 'collapsedFolders', 'focusLogs', 'focusLogSort', 'customTagColors']) {
+    if (data[field] !== undefined) state[field] = data[field];
+  }
+  if (data.dailyFolderId !== undefined) state.dailyFolderId = data.dailyFolderId || null;
 
   if (options.resetActive || !state.notes.some(n => n.id === state.activeNoteId)) {
     state.activeNoteId = state.notes[0] ? state.notes[0].id : null;
@@ -471,15 +469,13 @@ export function initStorage() {
   // Load Notes
   try {
     const savedNotes = localStorage.getItem('notidian_notes');
-    if (savedNotes) {
-      state.notes = JSON.parse(savedNotes);
-    }
+    state.notes = savedNotes ? JSON.parse(savedNotes) : null;
   } catch (e) {
     console.error("Failed to parse notes:", e);
     state.notes = null;
   }
 
-  if (!state.notes || !Array.isArray(state.notes) || state.notes.length === 0) {
+  if (!state.notes || !Array.isArray(state.notes)) {
     state.notes = structuredClone(sampleNotes);
     try {
       localStorage.setItem('notidian_notes', JSON.stringify(sampleNotes));

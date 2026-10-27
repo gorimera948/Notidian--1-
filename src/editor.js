@@ -1,5 +1,6 @@
 import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, historyState, createNotidianSnapshot, applyNotidianSnapshot } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
+import { createEditorSaveQueue } from './editor-save.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
 import { createDatabaseDOM, removeBlocksRecursively, updateBulkActionBar, updateBlockBulkActionBar } from './database.js';
 import {
@@ -23,6 +24,11 @@ function updateBacklinks() {
 
 const LOCAL_IMAGE_FALLBACK_MAX_BYTES = 1.5 * 1024 * 1024;
 const DROPBOX_IMAGE_UPLOAD_TIMEOUT_MS = 45000;
+const editorSaveQueue = createEditorSaveQueue(saveNotesToStorage);
+window.addEventListener('pagehide', editorSaveQueue.flush);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') editorSaveQueue.flush();
+});
 
 function cloneBlockProperties(block) {
   return { ...(block.properties || {}) };
@@ -1455,6 +1461,9 @@ function createEditableContent(block) {
 
   contentDiv.addEventListener('input', (e) => {
     block.content = serializeHtmlToWikiText(contentDiv);
+    const note = getActiveNote();
+    if (note) note.updatedAt = Date.now();
+    editorSaveQueue.schedule();
 
     // Check slash command trigger "/"
     handleSlashCommandTrigger(contentDiv, e);

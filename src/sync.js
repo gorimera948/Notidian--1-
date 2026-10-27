@@ -3,10 +3,16 @@ import {
   applyNotidianSnapshot,
   createNotidianSnapshot,
   getLocalSyncMeta,
-  setLocalSyncMeta
+  setLocalSyncMeta,
+  state
 } from './state.js';
 import { showToast } from './utils.js';
-import { synchronizeSnapshots, validateSnapshot } from './sync-policy.js';
+import { synchronizeSnapshots } from './sync-policy.js';
+import { canonicalJSON } from './sync-snapshot.js';
+import { contentId } from './sync-merge.js';
+import { createSyncBaselineStore } from './sync-baseline.js';
+import { createSyncDownloadTransport } from './sync-download.js';
+import { watchDropboxChanges } from './sync-watch.js';
 
 const APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY || '';
 const CONFIGURED_REDIRECT_URI = import.meta.env.VITE_DROPBOX_REDIRECT_URI || '';
@@ -37,6 +43,10 @@ let applyingRemote = false;
 let syncInFlight = null;
 let resyncRequested = false;
 let remoteRev = localStorage.getItem(REMOTE_REV_KEY) || '';
+let baselineStore = null, baselineKey = '';
+let stopWatching = null;
+let syncGeneration = 0;
+const downloadTransport = createSyncDownloadTransport(SYNC_PATH);
 const imageLinkCache = new Map();
 
 function getRedirectUri() {
@@ -171,7 +181,7 @@ function createAuth() {
   if (expiresAt) nextAuth.setAccessTokenExpiresAt(new Date(Number(expiresAt)));
 
   auth = nextAuth;
-  client = new Dropbox({ auth });
+  client = new Dropbox({ auth, fetch: downloadTransport.fetch });
   syncState.connected = Boolean(refreshToken);
   return nextAuth;
 }
@@ -197,12 +207,12 @@ function clearOAuthQuery() {
   window.history.replaceState({}, document.title, cleanUrl);
 }
 
-function refreshAppAfterRemoteApply() {
+function refreshAppAfterRemoteApply(refreshEditor = true) {
   if (window.Notidian) {
     if (typeof window.Notidian.loadPomodoroData === 'function') window.Notidian.loadPomodoroData();
     if (typeof window.Notidian.renderPomodoro === 'function') window.Notidian.renderPomodoro();
     if (typeof window.Notidian.renderNoteList === 'function') window.Notidian.renderNoteList();
-    if (typeof window.Notidian.renderEditor === 'function') window.Notidian.renderEditor();
+    if (refreshEditor && typeof window.Notidian.renderEditor === 'function') window.Notidian.renderEditor();
     if (typeof window.Notidian.renderAnalytics === 'function') window.Notidian.renderAnalytics();
     if (typeof window.Notidian.updateExistingTagsDatalist === 'function') window.Notidian.updateExistingTagsDatalist();
     if (typeof window.Notidian.updateTimerTargetTableSelect === 'function') window.Notidian.updateTimerTargetTableSelect();
@@ -260,14 +270,9 @@ async function handleOAuthReturn() {
 }
 
 async function downloadRemoteSnapshot() {
-  const response = await client.filesDownload({ path: SYNC_PATH });
-  const result = unwrap(response);
-  const blob = result.fileBlob || new Blob([result.fileBinary]);
-  const text = await blob.text();
-  const snapshot = validateSnapshot(JSON.parse(text));
-  if (!result.rev) throw new Error('Dropbox sync revision is missing.');
-  remoteRev = result.rev;
-  return { snapshot, rev: remoteRev };
+  const entry = await downloadTransport.read(client);
+  remoteRev = entry.rev;
+  return entry;
 }
 
 async function uploadLocalSnapshot(snapshot, expectedRev) {
@@ -290,11 +295,11 @@ async function uploadLocalSnapshot(snapshot, expectedRev) {
   return result;
 }
 
-async function backupSnapshot(snapshot) {
+async function backupSnapshot(snapshot, side = 'local') {
   // Keep backups in Dropbox rather than doubling the browser's storage quota.
   const deviceId = String(localStorage.getItem('notidian_client_id') || 'device').replace(/[^a-zA-Z0-9_-]/g, '_');
   await client.filesUpload({
-    path: `/backups/notidian-sync/${deviceId}-before-sync.json`,
+    path: `/backups/notidian-sync/${deviceId}-${side}-before-sync.json`,
     mode: { '.tag': 'overwrite' },
     autorename: false,
     mute: true,
@@ -303,13 +308,33 @@ async function backupSnapshot(snapshot) {
 }
 
 async function applyRemoteSnapshot(snapshot) {
+  const refreshEditor = activeNotesChanged(snapshot);
+  // Unchanged editor DOM handlers must keep referencing the live note objects.
+  const existing = new Map(state.notes.map(note => [note.id, note]));
+  snapshot.data.notes = snapshot.data.notes.map(note => {
+    const previous = existing.get(note.id);
+    return previous && canonicalJSON(previous) === canonicalJSON(note) ? previous : note;
+  });
   applyingRemote = true;
   try {
     applyNotidianSnapshot(snapshot, { markLocalChange: false });
-    refreshAppAfterRemoteApply();
+    refreshAppAfterRemoteApply(refreshEditor);
   } finally {
     applyingRemote = false;
   }
+}
+
+function activeNotesChanged(snapshot) {
+  const ids = new Set([state.activeNoteId, ...(state.panes || []).map(pane => pane.activeNoteId)].filter(Boolean));
+  return [...ids].some(id => canonicalJSON(state.notes.find(note => note.id === id)) !==
+    canonicalJSON(snapshot.data.notes.find(note => note.id === id)));
+}
+
+function canApplySnapshot(snapshot) {
+  if (!activeNotesChanged(snapshot)) return true;
+  if (state.isComposing) return false;
+  const active = globalThis.document?.activeElement;
+  return !active || !(active.isContentEditable || active.matches?.('input, textarea, select'));
 }
 
 export async function connectDropbox() {
@@ -342,6 +367,11 @@ export async function connectDropbox() {
 }
 
 export async function disconnectDropbox() {
+  syncGeneration++;
+  clearTimeout(debounceTimer);
+  downloadTransport.clear();
+  baselineStore = null;
+  baselineKey = '';
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(ACCESS_EXPIRES_KEY);
@@ -365,11 +395,25 @@ export async function syncNow(options = {}) {
     return syncInFlight;
   }
   clearTimeout(debounceTimer);
+  const generation = syncGeneration;
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  const key = contentId({ app: APP_KEY, refreshToken });
+  if (key !== baselineKey) {
+    baselineKey = key;
+    baselineStore = createSyncBaselineStore(key);
+  }
+  const history = baselineStore;
+  const assertSession = () => {
+    if (generation !== syncGeneration || refreshToken !== localStorage.getItem(REFRESH_TOKEN_KEY)) {
+      throw new Error('Dropbox connection changed during sync.');
+    }
+  };
 
   syncInFlight = (async () => {
-    setSyncState({ status: 'syncing', connected: true, message: 'Syncing with Dropbox...' });
+    if (options.reason !== 'poll') setSyncState({ status: 'syncing', connected: true, message: 'Syncing with Dropbox...' });
 
     try {
+      let conflicts = 0;
       const outcome = await synchronizeSnapshots({
         readRemote: async () => {
           try {
@@ -380,15 +424,20 @@ export async function syncNow(options = {}) {
           }
         },
         readLocal: createNotidianSnapshot,
-        backup: backupSnapshot,
-        upload: uploadLocalSnapshot,
-        apply: applyRemoteSnapshot,
+        readBase: () => history.read(),
+        remember: snapshot => { assertSession(); return history.remember(snapshot); },
+        backup: (snapshot, side) => { assertSession(); return backupSnapshot(snapshot, side); },
+        upload: (snapshot, rev) => { assertSession(); return uploadLocalSnapshot(snapshot, rev); },
+        apply: snapshot => { assertSession(); return applyRemoteSnapshot(snapshot); },
+        canApply: canApplySnapshot,
+        onConflicts: count => { conflicts = count; },
         isConflict: isDropboxConflict
       });
-      if (outcome === 'conflict') {
+      assertSession();
+      if (outcome === 'deferred') {
         setSyncState({
-          status: 'protected', connected: true,
-          message: 'データ保護中：更新日時とデータ量が一致しないため、上書きを停止しました'
+          status: 'pending', connected: true,
+          message: '別端末の変更を受信しました。入力が終わると反映します'
         });
         return;
       }
@@ -399,9 +448,11 @@ export async function syncNow(options = {}) {
       if (remoteRev) localStorage.setItem(REMOTE_REV_KEY, remoteRev);
 
       const now = Date.now();
-      setSyncState({ status: 'synced', connected: true, message: 'Synced', lastSyncedAt: now });
+      setSyncState({ status: 'synced', connected: true,
+        message: conflicts ? `同期済み：競合した変更を${conflicts}件の別ノートに保存しました` : 'Synced', lastSyncedAt: now });
       localStorage.setItem('notidian_dropbox_last_synced_at', String(now));
     } catch (err) {
+      if (generation !== syncGeneration) return;
       setSyncState({ status: navigator.onLine ? 'error' : 'offline', connected: true, message: 'Dropbox sync failed.' });
       console.error('Dropbox sync failed:', err);
     } finally {
@@ -576,6 +627,9 @@ export async function initDropboxSync() {
   window.addEventListener('notidian:data-changed', scheduleDropboxSync);
   window.addEventListener('online', () => syncNow({ reason: 'online' }));
   window.addEventListener('offline', () => setSyncState({ status: 'offline', message: 'Offline', connected: syncState.connected }));
+  if (stopWatching) stopWatching();
+  stopWatching = watchDropboxChanges({ sync: syncNow,
+    connected: () => initialized && Boolean(APP_KEY && localStorage.getItem(REFRESH_TOKEN_KEY)) });
 
   if (!APP_KEY) {
     initialized = true;
