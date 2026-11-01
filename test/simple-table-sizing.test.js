@@ -83,13 +83,17 @@ test('cancelled or detached pointer drags never commit draft widths', () => {
     finish: (draft, commit) => finished.push({ delta: draft.delta, commit }) });
   const emit = (type, x = 0) => {
     const event = new Event(type, { cancelable: true });
-    Object.assign(event, { button: 0, pointerId: 1, clientX: x });
+    Object.assign(event, { button: 0, pointerId: 1, clientX: x, clientY: 0 });
     handle.dispatchEvent(event);
   };
   emit('pointerdown'); emit('pointermove', 30); emit('pointercancel'); emit('pointerup');
   assert.deepEqual(finished, [{ delta: 30, commit: false }]);
   emit('pointerdown'); emit('pointermove', 40); emit('pointerup');
   assert.deepEqual(finished.at(-1), { delta: 40, commit: true });
+  emit('pointerdown'); emit('pointermove', 45);
+  const escape = new Event('keydown', { cancelable: true });
+  Object.assign(escape, { key: 'Escape' }); handle.dispatchEvent(escape);
+  assert.deepEqual(finished.at(-1), { delta: 45, commit: false });
   emit('pointerdown'); emit('pointermove', 50); handle.isConnected = false; emit('pointerup');
   assert.deepEqual(finished.at(-1), { delta: 50, commit: false });
 });

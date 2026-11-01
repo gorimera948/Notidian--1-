@@ -67,14 +67,19 @@ export function bindTableResize(handle, { start, move, finish }) {
     if (event.button !== 0 || drag) return;
     event.preventDefault(); event.stopPropagation();
     handle.focus({ preventScroll: true });
-    drag = { pointerId: event.pointerId, x: event.clientX, value: start() };
+    drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, value: start() };
     handle.classList.add('is-resizing');
     handle.setPointerCapture(event.pointerId);
   });
   handle.addEventListener('pointermove', event => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     event.preventDefault(); event.stopPropagation();
-    move(drag.value, event.clientX - drag.x);
+    move(drag.value, event.clientX - drag.x, event.clientY - drag.y);
+  });
+  handle.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !drag) return;
+    event.preventDefault(); event.stopPropagation();
+    end(false, { pointerId: drag.pointerId });
   });
   handle.addEventListener('pointerup', event => end(true, event));
   handle.addEventListener('pointercancel', event => end(false, event));
