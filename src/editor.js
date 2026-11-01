@@ -1,6 +1,7 @@
 import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, historyState, createNotidianSnapshot, applyNotidianSnapshot } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
 import { createEditorSaveQueue } from './editor-save.js';
+import { createSimpleTableProperties, createSimpleTableDOM } from './simple-table.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
 import { createDatabaseDOM, removeBlocksRecursively, updateBulkActionBar, updateBlockBulkActionBar } from './database.js';
 import {
@@ -765,7 +766,7 @@ export function createBlockDOM(block, parentBlock = null) {
     if (isDatabase) return;
 
     const isCheckbox = e.target.closest('.block-select-check');
-    const isInput = e.target.closest('input:not(.block-select-check), button, select');
+    const isInput = e.target.closest('input:not(.block-select-check), textarea, button, select');
 
     if (isInput) return;
 
@@ -1262,6 +1263,17 @@ export function createBlockDOM(block, parentBlock = null) {
     contentEl.style.display = 'none';
     blockWrapper.appendChild(contentEl);
 
+    return blockWrapper;
+  }
+
+  if (block.type === 'simple-table') {
+    const table = createSimpleTableDOM(block, (immediate = true) => {
+      const note = state.notes.find(note => findBlockAndParent(note.blocks || [], block.id));
+      if (note) note.updatedAt = Date.now();
+      if (immediate) saveNotesToStorage();
+      else editorSaveQueue.schedule();
+    });
+    blockWrapper.appendChild(table);
     return blockWrapper;
   }
 
@@ -2563,7 +2575,9 @@ function selectSlashMenuItem() {
 
   // 入力中に混入したスラッシュや￥などのトリガー記号を一括で完全に削除する（IME確定ズレ対策）
   let text = activeContentDiv.textContent;
-  text = text.replace(/[\/／\\￥¥]/g, '');
+  text = newType === 'simple-table'
+    ? text.replace(/[\/／\\￥¥]$/, '')
+    : text.replace(/[\/／\\￥¥]/g, '');
 
   // Update block type
   found.block.type = newType;
@@ -2585,6 +2599,14 @@ function selectSlashMenuItem() {
       const nextBlock = { id: generateId(), type: 'p', content: '' };
       found.parentArray.splice(found.index + 1, 0, nextBlock);
       focusAfterBlockId = nextBlock.id;
+    }
+  }
+  if (newType === 'simple-table') {
+    found.block.properties = createSimpleTableProperties();
+    if (text) found.block.properties.rows[0].cells[found.block.properties.columns[0].id] = text;
+    found.block.content = '';
+    if (!found.parentArray[found.index + 1]) {
+      found.parentArray.push({ id: generateId(), type: 'p', content: '' });
     }
   }
   if (newType === 'database') {
@@ -2620,6 +2642,10 @@ function selectSlashMenuItem() {
     if (focusAfterBlockId) {
       const nextEl = document.querySelector(`.block-content[data-id="${focusAfterBlockId}"]`);
       if (nextEl) focusBlock(nextEl);
+      return;
+    }
+    if (newType === 'simple-table') {
+      document.querySelector(`.simple-table-container[data-block-id="${found.block.id}"] textarea`)?.focus();
       return;
     }
     // データベース、画像、区切り線の場合は非表示DOMとなりフォーカスできないため、処理をスキップ（ブラウザフリーズ防止）

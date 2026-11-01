@@ -5749,3 +5749,21 @@ tr.db-data-row:hover .db-row-hover-toolbar {
     font-size: 12px;
   }
 }
+
+/* Plain editable tables, separate from database views. */
+.simple-table-container { min-width: 0; width: 100%; margin: 8px 0 12px; }
+.simple-table-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 8px; }
+.simple-table-toolbar button { border: 1px solid var(--border-light); border-radius: 5px; padding: 5px 9px; background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 12px; }
+.simple-table-toolbar button:hover, .simple-table-toolbar button[aria-pressed="true"] { color: var(--accent-primary); background: rgba(139, 92, 246, 0.1); }
+.simple-table-toolbar button:disabled { opacity: .35; cursor: default; }
+.simple-table-scroll { width: 100%; overflow-x: auto; border: 1px solid var(--border-light); border-radius: 6px; }
+.simple-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.simple-table th, .simple-table td { min-width: 120px; width: 160px; padding: 0; border: 1px solid var(--border-light); vertical-align: top; }
+.simple-table tr:first-child > * { border-top: 0; }
+.simple-table tr:last-child > * { border-bottom: 0; }
+.simple-table tr > *:first-child { border-left: 0; }
+.simple-table tr > *:last-child { border-right: 0; }
+.simple-table th { background: rgba(139, 92, 246, 0.1); }
+.simple-table .is-active-cell { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
+.simple-table-cell { display: block; box-sizing: border-box; width: 100%; min-width: 120px; min-height: 42px; padding: 10px 12px; margin: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; resize: vertical; }
+.simple-table th .simple-table-cell { font-weight: 600; }
