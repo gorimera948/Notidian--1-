@@ -61,6 +61,15 @@ export function getSimpleTableDragSize(properties, axis, dx, dy, rowHeight = 44)
   };
 }
 
+function createReorderedSimpleTable(properties, axis, from, to, availableWidth) {
+  const draft = structuredClone(properties);
+  ensureSimpleTablePixelWidths(draft, availableWidth);
+  const items = draft[axis];
+  const [item] = items.splice(from, 1);
+  items.splice(to, 0, item);
+  return draft;
+}
+
 export function createSimpleTableDOM(block, onChange) {
   const properties = block.properties ||= createSimpleTableProperties();
   const container = document.createElement('div');
@@ -88,6 +97,9 @@ export function createSimpleTableDOM(block, onChange) {
     scroll.className = 'simple-table-scroll';
     const table = document.createElement('table');
     table.className = 'simple-table'; table.setAttribute('aria-label', '簡易テーブル');
+    const reorderLayer = document.createElement('div');
+    reorderLayer.className = 'simple-table-reorder-layer';
+    let reorderDrag = null;
     let colgroup;
     const columnHandles = [], countHandles = [];
     let shown = properties;
@@ -103,6 +115,84 @@ export function createSimpleTableDOM(block, onChange) {
         handle.setAttribute('aria-valuetext', `${Math.round(widths[index])}px`);
       });
       countHandles.forEach(handle => { handle.dataset.size = `${draft.rows.length}行 × ${draft.columns.length}列`; });
+      positionReorderHandles(draft);
+    };
+    const positionReorderHandles = (draft = shown) => {
+      if (reorderDrag) return;
+      const origin = frame.getBoundingClientRect(), viewport = scroll.getBoundingClientRect();
+      reorderLayer.querySelectorAll('button').forEach(handle => {
+        const axis = handle.dataset.reorderAxis;
+        const index = draft[axis].findIndex(item => item.id === handle.dataset.recordId);
+        const cell = axis === 'rows' ? table.rows[index] : table.rows[0]?.cells[index];
+        if (!cell) { handle.hidden = true; return; }
+        const rect = cell.getBoundingClientRect();
+        if (axis === 'rows') {
+          handle.style.top = `${rect.top + rect.height / 2 - origin.top}px`;
+        } else {
+          const left = Math.max(rect.left, viewport.left), right = Math.min(rect.right, viewport.right);
+          handle.hidden = right <= left;
+          handle.style.left = `${(left + right) / 2 - origin.left}px`;
+        }
+      });
+    };
+    const reorderFocusSelector = (axis, id) => `[data-reorder-axis="${axis}"][data-record-id="${id}"]`;
+    const renderReorderHandles = (draft, preview) => {
+      if (reorderDrag) return; // Keep the captured pointer handle connected.
+      reorderLayer.replaceChildren();
+      if (preview) return;
+      ['rows', 'columns'].forEach(axis => draft[axis].forEach((item, index) => {
+        const handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = `simple-table-reorder-handle simple-table-reorder-${axis}`;
+        handle.dataset.reorderAxis = axis; handle.dataset.recordId = item.id;
+        handle.textContent = '⠿';
+        handle.setAttribute('aria-label', `${index + 1}${axis === 'rows' ? '行' : '列'}目を移動`);
+        handle.title = axis === 'rows' ? 'ドラッグして行を並び替え（上下キーでも移動）' : 'ドラッグして列を並び替え（左右キーでも移動）';
+        handle.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); });
+        bindTableResize(handle, {
+          start: () => {
+            const cells = axis === 'rows' ? [...table.rows] : [...table.rows[0].cells];
+            const centers = cells.map(cell => {
+              const rect = cell.getBoundingClientRect();
+              return axis === 'rows' ? rect.top + rect.height / 2 : rect.left + rect.width / 2;
+            });
+            reorderDrag = { axis, id: item.id };
+            container.classList.add('is-reordering');
+            return { original: structuredClone(properties), centers, target: index, draft: null,
+              scrollLeft: scroll.scrollLeft, width: availableWidth() };
+          },
+          move: (drag, dx, dy) => {
+            const position = drag.centers[index] + (axis === 'rows' ? dy : dx + scroll.scrollLeft - drag.scrollLeft);
+            const target = drag.centers.reduce((nearest, center, ci) =>
+              Math.abs(center - position) < Math.abs(drag.centers[nearest] - position) ? ci : nearest, 0);
+            if (target === drag.target) return;
+            drag.target = target;
+            drag.draft = createReorderedSimpleTable(drag.original, axis, index, target, drag.width);
+            renderGrid(drag.draft, true);
+          },
+          finish: (drag, commit) => {
+            reorderDrag = null; container.classList.remove('is-reordering');
+            const selector = reorderFocusSelector(axis, item.id);
+            if (commit && drag.draft && drag.target !== index) commitStructure(drag.draft, axis, selector);
+            else {
+              renderGrid(properties);
+              reorderLayer.querySelector(selector)?.focus({ preventScroll: true });
+            }
+          }
+        });
+        handle.addEventListener('keydown', event => {
+          if (event.ctrlKey || event.metaKey || event.altKey) return;
+          const keys = axis === 'rows' ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight'];
+          if (!keys.includes(event.key)) return;
+          event.preventDefault(); event.stopPropagation();
+          const to = index + (event.key === keys[0] ? -1 : 1);
+          if (to >= 0 && to < properties[axis].length) {
+            commitStructure(createReorderedSimpleTable(properties, axis, index, to, availableWidth()), axis, reorderFocusSelector(axis, item.id));
+          }
+        });
+        reorderLayer.appendChild(handle);
+      }));
+      positionReorderHandles(draft);
     };
     const makeColumnHandle = ci => {
       const handle = document.createElement('div');
@@ -150,8 +240,10 @@ export function createSimpleTableDOM(block, onChange) {
       const body = document.createElement('tbody');
       draft.rows.forEach((row, ri) => {
         const tr = document.createElement('tr');
+        if (reorderDrag?.axis === 'rows' && reorderDrag.id === row.id) tr.classList.add('is-table-reorder-row');
         draft.columns.forEach((column, ci) => {
           const td = document.createElement(draft.headerRow && ri === 0 ? 'th' : 'td');
+          if (reorderDrag?.axis === 'columns' && reorderDrag.id === column.id) td.classList.add('is-table-reorder-column');
           if (td.tagName === 'TH') td.scope = 'col';
           const input = document.createElement('textarea');
           input.className = 'simple-table-cell'; input.rows = 1;
@@ -188,8 +280,9 @@ export function createSimpleTableDOM(block, onChange) {
       });
       table.appendChild(body); setColumnLayout(draft);
       scroll.scrollLeft = left; scroll.scrollTop = top;
+      renderReorderHandles(draft, preview);
     };
-    const commitStructure = (draft, axis) => {
+    const commitStructure = (draft, axis, focusSelector = `[data-table-axis="${axis}"]`) => {
       // Record any debounced cell edits before a drag removes their row/column.
       // Undo can then restore the complete table as it was before the gesture.
       save();
@@ -198,7 +291,7 @@ export function createSimpleTableDOM(block, onChange) {
       if (!properties.rows.some(row => row.id === activeRow)) activeRow = properties.rows.at(-1).id;
       if (!properties.columns.some(column => column.id === activeColumn)) activeColumn = properties.columns.at(-1).id;
       save(); redraw();
-      container.querySelector(`[data-table-axis="${axis}"]`)?.focus({ preventScroll: true });
+      container.querySelector(focusSelector)?.focus({ preventScroll: true });
     };
     const makeCountHandle = (axis, label, symbol) => {
       const handle = document.createElement('button');
@@ -249,7 +342,8 @@ export function createSimpleTableDOM(block, onChange) {
       });
       countHandles.push(handle); frame.appendChild(handle);
     };
-    scroll.appendChild(table); frame.appendChild(scroll); container.appendChild(frame);
+    scroll.appendChild(table); frame.append(scroll, reorderLayer); container.appendChild(frame);
+    scroll.addEventListener('scroll', () => positionReorderHandles());
     makeCountHandle('rows', '行を増減', '+');
     makeCountHandle('columns', '列を増減', '+');
     makeCountHandle('both', '行と列を増減', '⤡');
