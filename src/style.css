@@ -5768,10 +5768,11 @@ tr.db-data-row:hover .db-row-hover-toolbar {
 .simple-table-cell { display: block; box-sizing: border-box; width: 100%; min-width: 0; min-height: 42px; padding: 10px 12px; margin: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; resize: vertical; }
 .simple-table th .simple-table-cell { font-weight: 600; }
 
-.simple-table-frame { position: relative; }
+.simple-table-frame { position: relative; max-width: 100%; }
 .simple-table-column-resizer, .simple-table-width-resizer { position: absolute; top: 0; bottom: 0; width: 12px; cursor: col-resize; touch-action: none; user-select: none; z-index: 3; outline: none; }
 .simple-table-column-resizer { right: -6px; }
-.simple-table-width-resizer { right: -8px; }
+.simple-table tr:first-child > :last-child .simple-table-column-resizer { right: 0; }
+.simple-table-width-resizer { right: -7px; top: 44px; }
 .simple-table-column-resizer::after, .simple-table-width-resizer::after { content: ''; position: absolute; left: 5px; width: 3px; border-radius: 3px; background: var(--accent-primary); opacity: 0; }
 .simple-table-column-resizer::after { top: 0; bottom: 0; }
 .simple-table-width-resizer::after { top: 50%; height: 32px; transform: translateY(-50%); opacity: .55; }

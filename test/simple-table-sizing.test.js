@@ -1,65 +1,70 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSimpleTableProperties } from '../src/simple-table.js';
-import { getSimpleTableWidth, setSimpleTableWidth, getSimpleTableColumnWidths,
-  resizeSimpleTableColumn, MIN_COLUMN_WIDTH, bindTableResize } from '../src/simple-table-sizing.js';
+import { createSimpleTableProperties, addSimpleTableColumn, removeSimpleTableColumn } from '../src/simple-table.js';
+import { getSimpleTableColumnWidths, resizeSimpleTableColumn, resetSimpleTableWidths,
+  MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH, bindTableResize } from '../src/simple-table-sizing.js';
 import { mergeSnapshots } from '../src/sync-merge.js';
 
-test('legacy tables retain full width and table width is clamped and serialized', () => {
+test('new tables start at 360px and retain their widths on narrow screens', () => {
   const table = createSimpleTableProperties();
-  assert.equal(getSimpleTableWidth(table), 100);
-  setSimpleTableWidth(table, 62.36); assert.equal(getSimpleTableWidth(table), 62.4);
-  assert.equal(getSimpleTableWidth(JSON.parse(JSON.stringify(table))), 62.4);
-  setSimpleTableWidth(table, 999); assert.equal(table.width, 100);
-  setSimpleTableWidth(table, -1); assert.equal(table.width, 25);
-  assert.equal(setSimpleTableWidth(table, NaN), false);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [120, 120, 120]);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 180), [120, 120, 120]);
 });
 
-test('column resizing moves one boundary while retaining the total table width', () => {
+test('resizing any column changes only that column, including the right edge', () => {
   const table = createSimpleTableProperties();
-  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [200, 200, 200]);
-  assert.equal(resizeSimpleTableColumn(table, 0, 50, 600), true);
-  const widths = getSimpleTableColumnWidths(table, 600);
-  [250, 150, 200].forEach((expected, i) => assert.ok(Math.abs(widths[i] - expected) < 0.01));
-  const restored = getSimpleTableColumnWidths(JSON.parse(JSON.stringify(table)), 600);
-  assert.deepEqual(restored, widths);
+  resizeSimpleTableColumn(table, 0, 50, 600);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [170, 120, 120]);
+  resizeSimpleTableColumn(table, 2, 70, 600);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [170, 120, 190]);
+  assert.deepEqual(getSimpleTableColumnWidths(JSON.parse(JSON.stringify(table)), 180), [170, 120, 190]);
 });
 
-test('columns retain readable minimum widths, including narrow screens', () => {
-  const table = createSimpleTableProperties();
-  resizeSimpleTableColumn(table, 0, 10000, 600);
-  assert.equal(Math.round(getSimpleTableColumnWidths(table, 600)[1]), MIN_COLUMN_WIDTH);
-  assert.ok(getSimpleTableColumnWidths(table, 180).every(width => width >= MIN_COLUMN_WIDTH));
-  assert.equal(resizeSimpleTableColumn(table, 0, 30, 180), false);
-  assert.equal(resizeSimpleTableColumn(table, 2, 30, 600), false);
+test('legacy percentage and weight widths migrate without shifting other columns', () => {
+  const table = { columns: [{ id: 'a', width: 1 }, { id: 'b', width: 2 }, { id: 'c', width: 3 }], width: 80 };
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [80, 160, 240]);
+  resizeSimpleTableColumn(table, 2, 40, 600);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [80, 160, 280]);
+  assert.equal(table.columnSizing, 'pixels');
+  assert.equal(Object.hasOwn(table, 'width'), false);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 900), [80, 160, 280]);
 });
 
-test('resizing still works when another column was already clamped to minimum width', () => {
+test('column bounds do not change the adjacent column', () => {
   const table = createSimpleTableProperties();
-  table.columns.forEach((col, i) => { col.width = [30, 200, 400][i]; });
-  const before = getSimpleTableColumnWidths(table, 500);
-  resizeSimpleTableColumn(table, 1, 30, 500);
-  const after = getSimpleTableColumnWidths(table, 500);
-  assert.ok(Math.abs(after[0] - before[0]) < 0.01);
-  assert.ok(Math.abs(after[1] - before[1] - 30) < 0.01);
-  assert.ok(Math.abs(after[2] - before[2] + 30) < 0.01);
+  resizeSimpleTableColumn(table, 1, -10000, 600);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [120, MIN_COLUMN_WIDTH, 120]);
+  assert.equal(resizeSimpleTableColumn(table, 1, -30, 600), false);
+  resizeSimpleTableColumn(table, 2, 10000, 600);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [120, MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH]);
 });
 
-test('width changes and edits from another device merge without losing cell content', () => {
+test('adding and deleting columns retain existing widths and reset uses the compact default', () => {
+  const table = createSimpleTableProperties();
+  resizeSimpleTableColumn(table, 0, 80, 600);
+  const added = addSimpleTableColumn(table);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [200, 120, 120, 120]);
+  removeSimpleTableColumn(table, added.id);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [200, 120, 120]);
+  resetSimpleTableWidths(table);
+  assert.deepEqual(getSimpleTableColumnWidths(table, 600), [120, 120, 120]);
+});
+
+test('independent width changes and cell edits from different devices merge', () => {
   const base = { app: 'notidian', schemaVersion: 1, syncMeta: { updatedAt: 1, source: 'notes' },
     data: { notes: [{ id: 'note', title: 'table', blocks: [{ id: 'table', type: 'simple-table',
       content: '', properties: createSimpleTableProperties() }] }], folders: [], focusLogs: [] } };
   const local = structuredClone(base), remote = structuredClone(base);
   const p = local.data.notes[0].blocks[0].properties;
-  setSimpleTableWidth(p, 70); resizeSimpleTableColumn(p, 0, 40, 600);
+  resizeSimpleTableColumn(p, 0, 40, 600);
   const r = remote.data.notes[0].blocks[0].properties;
+  resizeSimpleTableColumn(r, 2, 30, 600);
   r.rows[0].cells[r.columns[0].id] = 'スマホで編集';
   const merged = mergeSnapshots(local, remote, base);
   assert.equal(merged.conflicts, 0);
   const result = merged.snapshot.data.notes[0].blocks[0].properties;
-  assert.equal(result.width, 70);
   assert.equal(result.rows[0].cells[result.columns[0].id], 'スマホで編集');
-  assert.ok(result.columns[0].width > result.columns[1].width);
+  assert.deepEqual(getSimpleTableColumnWidths(result, 600), [160, 120, 150]);
 });
 
 test('cancelled or detached pointer drags never commit draft widths', () => {

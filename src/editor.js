@@ -1,6 +1,7 @@
 import { state, getActiveNote, saveNotesToStorage, pushHistory, undo, redo, historyState, createNotidianSnapshot, applyNotidianSnapshot } from './state.js';
 import { generateId, escapeHTML } from './utils.js';
 import { createEditorSaveQueue } from './editor-save.js';
+import { preventUnfocusedBackspace, isEditableKeyboardTarget } from './editor-keyboard.js';
 import { createSimpleTableProperties, createSimpleTableDOM } from './simple-table.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
 import { createDatabaseDOM, removeBlocksRecursively, updateBulkActionBar, updateBlockBulkActionBar } from './database.js';
@@ -27,6 +28,7 @@ const LOCAL_IMAGE_FALLBACK_MAX_BYTES = 1.5 * 1024 * 1024;
 const DROPBOX_IMAGE_UPLOAD_TIMEOUT_MS = 45000;
 const editorSaveQueue = createEditorSaveQueue(saveNotesToStorage);
 window.addEventListener('pagehide', editorSaveQueue.flush);
+window.addEventListener('keydown', preventUnfocusedBackspace, true);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') editorSaveQueue.flush();
 });
@@ -3910,6 +3912,7 @@ export function setupMultipleBlockSelectionShortcuts() {
   }
 
   window.addEventListener('keydown', (e) => {
+    if (isEditableKeyboardTarget(e.target) && !e.target.closest?.('.block-content')) return;
     const selInfo = getMultipleBlockSelectionRange();
     if (!selInfo) return;
 

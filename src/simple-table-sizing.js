@@ -1,22 +1,19 @@
 export const MIN_COLUMN_WIDTH = 80;
-export const MIN_TABLE_WIDTH = 25;
+export const MAX_COLUMN_WIDTH = 2000;
+export const DEFAULT_COLUMN_WIDTH = 120;
 const weight = column => Number.isFinite(Number(column.width)) && Number(column.width) > 0 ? Number(column.width) : 160;
-
-export function getSimpleTableWidth(properties) {
-  const width = Number(properties.width);
-  return Number.isFinite(width) ? Math.max(MIN_TABLE_WIDTH, Math.min(100, width)) : 100;
-}
-
-export function setSimpleTableWidth(properties, width) {
-  if (!Number.isFinite(width)) return false;
-  properties.width = Math.round(Math.max(MIN_TABLE_WIDTH, Math.min(100, width)) * 10) / 10;
-  return true;
-}
+const clamp = width => Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, width));
 
 export function getSimpleTableColumnWidths(properties, availableWidth) {
+  if (properties.columnSizing === 'pixels') {
+    return properties.columns.map(column => clamp(Number(column.width) || DEFAULT_COLUMN_WIDTH));
+  }
+  // Older tables stored percentages/relative weights. Preserve their visible
+  // size until the first resize converts them to independent pixel widths.
   const weights = properties.columns.map(weight);
+  const oldPercent = Number.isFinite(Number(properties.width)) ? Math.max(25, Math.min(100, Number(properties.width))) : 100;
   const result = [];
-  let remaining = Math.max(weights.length * MIN_COLUMN_WIDTH, Number(availableWidth) || 0);
+  let remaining = Math.max(weights.length * MIN_COLUMN_WIDTH, (Number(availableWidth) || weights.length * 160) * oldPercent / 100);
   let open = weights.map((_, index) => index);
   while (open.length) {
     const sum = open.reduce((total, index) => total + weights[index], 0);
@@ -31,16 +28,28 @@ export function getSimpleTableColumnWidths(properties, availableWidth) {
   return result;
 }
 
-export function resizeSimpleTableColumn(properties, index, delta, availableWidth) {
-  if (!Number.isInteger(index) || index < 0 || index >= properties.columns.length - 1 || !Number.isFinite(delta)) return false;
+export function ensureSimpleTablePixelWidths(properties, availableWidth) {
+  if (properties.columnSizing === 'pixels') return;
   const widths = getSimpleTableColumnWidths(properties, availableWidth);
-  const shift = Math.max(MIN_COLUMN_WIDTH - widths[index], Math.min(widths[index + 1] - MIN_COLUMN_WIDTH, delta));
-  if (Math.abs(shift) < 0.01) return false;
-  const free = widths.findIndex(width => width > MIN_COLUMN_WIDTH + 0.01);
-  const scale = weight(properties.columns[free]) / widths[free];
-  properties.columns[index].width = Number(((widths[index] + shift) * scale).toFixed(4));
-  properties.columns[index + 1].width = Number(((widths[index + 1] - shift) * scale).toFixed(4));
+  properties.columns.forEach((column, index) => { column.width = Math.round(clamp(widths[index]) * 10) / 10; });
+  properties.columnSizing = 'pixels';
+  delete properties.width;
+}
+
+export function resizeSimpleTableColumn(properties, index, delta, availableWidth) {
+  if (!Number.isInteger(index) || index < 0 || index >= properties.columns.length || !Number.isFinite(delta)) return false;
+  const widths = getSimpleTableColumnWidths(properties, availableWidth);
+  const next = Math.round(clamp(widths[index] + delta) * 10) / 10;
+  if (Math.abs(next - widths[index]) < 0.01) return false;
+  ensureSimpleTablePixelWidths(properties, availableWidth);
+  properties.columns[index].width = next;
   return true;
+}
+
+export function resetSimpleTableWidths(properties) {
+  properties.columnSizing = 'pixels';
+  delete properties.width;
+  properties.columns.forEach(column => { column.width = DEFAULT_COLUMN_WIDTH; });
 }
 
 // Pointer capture keeps mouse and touch drags on the handle. Draft changes are
