@@ -413,8 +413,14 @@ export function createDatabaseDOM(block) {
     }
   });
 
-  const activeViewId = block.properties.activeViewId || views[0].id;
-  const activeView = views.find(v => v.id === activeViewId) || views[0];
+  const activeView = views.find(v => v.id === block.properties.activeViewId) || views[0];
+  const activeViewId = activeView.id;
+  const switchView = viewId => {
+    if (viewId === activeViewId) return;
+    block.properties.activeViewId = viewId;
+    saveNotesToStorage();
+    renderEditor();
+  };
 
   // データベースタイトル（テーブル名）の追加
   const dbTitleRow = document.createElement('div');
@@ -436,6 +442,23 @@ export function createDatabaseDOM(block) {
   });
   dbTitleRow.appendChild(dbTitleInput);
   container.appendChild(dbTitleRow);
+
+  const viewPicker = document.createElement('label');
+  viewPicker.className = 'db-mobile-view-picker';
+  const viewPickerLabel = document.createElement('span');
+  viewPickerLabel.textContent = 'ビュー';
+  const viewSelect = document.createElement('select');
+  for (const view of views) {
+    const option = document.createElement('option');
+    option.value = view.id;
+    option.textContent = view.name;
+    viewSelect.appendChild(option);
+  }
+  viewSelect.value = activeViewId;
+  viewPicker.addEventListener('click', event => event.stopPropagation());
+  viewSelect.addEventListener('change', () => switchView(viewSelect.value));
+  viewPicker.append(viewPickerLabel, viewSelect);
+  container.appendChild(viewPicker);
 
   const tabBar = document.createElement('div');
   tabBar.className = 'db-views-tab-bar';
@@ -526,12 +549,7 @@ export function createDatabaseDOM(block) {
     }
 
     tab.addEventListener('click', () => {
-      if (isDraggingViewTab) return;
-      if (block.properties.activeViewId !== view.id) {
-        block.properties.activeViewId = view.id;
-        saveNotesToStorage();
-        renderEditor();
-      }
+      if (!isDraggingViewTab) switchView(view.id);
     });
 
     tabContainer.appendChild(tab);
