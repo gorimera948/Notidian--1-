@@ -2321,6 +2321,13 @@ tr.db-data-row.selected td {
   display: none;
 }
 
+.db-view-config-popover {
+  width: 220px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
 @media (max-width: 760px), (pointer: coarse) {
   .db-mobile-view-picker {
     display: flex;
@@ -2342,6 +2349,25 @@ tr.db-data-row.selected td {
     background: var(--bg-secondary);
     color: var(--text-primary);
     font-size: 16px;
+  }
+
+  .db-mobile-view-settings {
+    flex: 0 0 44px;
+    min-height: 44px;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .db-view-config-popover select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .db-view-config-popover .db-filter-apply-btn {
+    min-height: 44px;
   }
 }
 
@@ -4372,7 +4398,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 /* ギャラリーグリッド */
 .db-gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
   gap: 16px;
 }
 

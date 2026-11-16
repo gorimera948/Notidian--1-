@@ -443,11 +443,13 @@ export function createDatabaseDOM(block) {
   dbTitleRow.appendChild(dbTitleInput);
   container.appendChild(dbTitleRow);
 
-  const viewPicker = document.createElement('label');
+  const viewPicker = document.createElement('div');
   viewPicker.className = 'db-mobile-view-picker';
   const viewPickerLabel = document.createElement('span');
   viewPickerLabel.textContent = 'ビュー';
+  viewPickerLabel.setAttribute('aria-hidden', 'true');
   const viewSelect = document.createElement('select');
+  viewSelect.setAttribute('aria-label', 'ビュー');
   for (const view of views) {
     const option = document.createElement('option');
     option.value = view.id;
@@ -457,7 +459,16 @@ export function createDatabaseDOM(block) {
   viewSelect.value = activeViewId;
   viewPicker.addEventListener('click', event => event.stopPropagation());
   viewSelect.addEventListener('change', () => switchView(viewSelect.value));
-  viewPicker.append(viewPickerLabel, viewSelect);
+  const mobileViewSettings = document.createElement('button');
+  mobileViewSettings.type = 'button';
+  mobileViewSettings.className = 'db-mobile-view-settings';
+  mobileViewSettings.setAttribute('aria-label', 'ビューの表示設定');
+  mobileViewSettings.innerHTML = '<i class="fa-solid fa-gear" aria-hidden="true"></i>';
+  mobileViewSettings.addEventListener('click', event => {
+    event.stopPropagation();
+    showViewConfigPopover(event, block, activeView);
+  });
+  viewPicker.append(viewPickerLabel, viewSelect, mobileViewSettings);
   container.appendChild(viewPicker);
 
   const tabBar = document.createElement('div');
@@ -748,18 +759,22 @@ export function createDatabaseDOM(block) {
 
   toolbar.appendChild(tagFilterDropdownBtn);
 
-  // グループ化ボタン
-  const isGrouped = block.properties.groupBy === 'col-status';
-  const groupBtn = document.createElement('button');
-  groupBtn.className = `btn-db-toolbar ${isGrouped ? 'active' : ''}`;
-  groupBtn.innerHTML = `<i class="fa-solid fa-folder-tree"></i> グループ分け: ${isGrouped ? 'ON' : 'OFF'}`;
-  groupBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    block.properties.groupBy = isGrouped ? null : 'col-status';
-    saveNotesToStorage();
-    renderEditor();
-  });
-  toolbar.appendChild(groupBtn);
+  // Grouping changes the table presentation only; it must not mask other layouts.
+  const layout = activeView.layout || 'table';
+  const isTableLayout = layout !== 'gallery' && layout !== 'calendar' && !layout.startsWith('chart');
+  const isGrouped = isTableLayout && block.properties.groupBy === 'col-status';
+  if (isTableLayout) {
+    const groupBtn = document.createElement('button');
+    groupBtn.className = `btn-db-toolbar ${isGrouped ? 'active' : ''}`;
+    groupBtn.innerHTML = `<i class="fa-solid fa-folder-tree"></i> グループ分け: ${isGrouped ? 'ON' : 'OFF'}`;
+    groupBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      block.properties.groupBy = isGrouped ? null : 'col-status';
+      saveNotesToStorage();
+      renderEditor();
+    });
+    toolbar.appendChild(groupBtn);
+  }
 
   // CSV Menu (Import / Export Dropdown)
   const csvFileInput = document.createElement('input');
@@ -1106,7 +1121,7 @@ export function createDatabaseDOM(block) {
     container.appendChild(groupsWrapper);
   } else {
     // Layoutに応じた切り替え（テーブル、カレンダー、各種グラフ）
-    if (activeView.layout === 'calendar') {
+    if (layout === 'calendar') {
       const calendarWrapper = document.createElement('div');
       calendarWrapper.style.padding = '16px';
       calendarWrapper.style.overflowX = 'auto';
@@ -1114,14 +1129,14 @@ export function createDatabaseDOM(block) {
       const calendarEl = renderCalendarViewDOM(block, visibleRows);
       calendarWrapper.appendChild(calendarEl);
       container.appendChild(calendarWrapper);
-    } else if (activeView.layout === 'gallery') {
+    } else if (layout === 'gallery') {
       const galleryWrapper = document.createElement('div');
       galleryWrapper.className = 'db-gallery-container';
 
       const galleryEl = renderGalleryViewDOM(block, visibleRows);
       galleryWrapper.appendChild(galleryEl);
       container.appendChild(galleryWrapper);
-    } else if (activeView.layout && activeView.layout.startsWith('chart')) {
+    } else if (layout.startsWith('chart')) {
       const chartWrapper = document.createElement('div');
       chartWrapper.style.padding = '16px';
       chartWrapper.style.overflowX = 'auto';
@@ -2130,23 +2145,20 @@ function showViewConfigPopover(e, block, view) {
 
   const popover = document.createElement('div');
   popover.className = 'db-floating-popover db-view-config-popover';
-  popover.style.left = `${e.clientX}px`;
-  popover.style.top = `${e.clientY + 12}px`;
-  popover.style.width = '220px';
-
-  view.layout = view.layout || 'table';
+  const anchor = e.currentTarget.getBoundingClientRect();
+  const layout = view.layout || 'table';
 
   popover.innerHTML = `
     <div style="font-size:10px; color:var(--text-muted); font-weight:700; padding:4px 6px; border-bottom:1px solid var(--border-light);">表示設定</div>
     <div style="padding:8px; display:flex; flex-direction:column; gap:6px;">
-      <label style="font-size:9px; color:var(--text-muted); font-weight:700;">表示レイアウト</label>
+      <label for="view-layout-select" style="font-size:9px; color:var(--text-muted); font-weight:700;">表示レイアウト</label>
       <select id="view-layout-select" class="db-filter-val-select" style="width:100%;">
-        <option value="table" ${view.layout === 'table' ? 'selected' : ''}>📋 テーブル（表）</option>
-        <option value="calendar" ${view.layout === 'calendar' ? 'selected' : ''}>📅 カレンダー</option>
-        <option value="gallery" ${view.layout === 'gallery' ? 'selected' : ''}>🏞️ ギャラリー</option>
-        <option value="chart-bar" ${view.layout === 'chart-bar' ? 'selected' : ''}>📊 棒グラフ</option>
-        <option value="chart-line" ${view.layout === 'chart-line' ? 'selected' : ''}>📈 線グラフ</option>
-        <option value="chart-donut" ${view.layout === 'chart-donut' ? 'selected' : ''}>🍩 ドーナツグラフ</option>
+        <option value="table" ${layout === 'table' ? 'selected' : ''}>📋 テーブル（表）</option>
+        <option value="calendar" ${layout === 'calendar' ? 'selected' : ''}>📅 カレンダー</option>
+        <option value="gallery" ${layout === 'gallery' ? 'selected' : ''}>🏞️ ギャラリー</option>
+        <option value="chart-bar" ${layout === 'chart-bar' ? 'selected' : ''}>📊 棒グラフ</option>
+        <option value="chart-line" ${layout === 'chart-line' ? 'selected' : ''}>📈 線グラフ</option>
+        <option value="chart-donut" ${layout === 'chart-donut' ? 'selected' : ''}>🍩 ドーナツグラフ</option>
       </select>
     </div>
     <div class="db-popover-divider" style="margin:6px 0 4px 0;"></div>
@@ -2164,6 +2176,11 @@ function showViewConfigPopover(e, block, view) {
   });
 
   document.body.appendChild(popover);
+  const { width, height } = popover.getBoundingClientRect();
+  const below = anchor.bottom + 6;
+  const maxTop = window.innerHeight - height - 8;
+  popover.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - width - 8))}px`;
+  popover.style.top = `${Math.max(8, Math.min(below <= maxTop ? below : anchor.top - height - 6, maxTop))}px`;
 }
 
 function showFilterConfigPopover(e, block, view) {
