@@ -5816,8 +5816,35 @@ tr.db-data-row:hover .db-row-hover-toolbar {
 .simple-table tr > *:last-child { border-right: 0; }
 .simple-table th { background: rgba(139, 92, 246, 0.1); }
 .simple-table .is-active-cell { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
-.simple-table-cell { display: block; box-sizing: border-box; width: 100%; min-width: 0; min-height: 42px; padding: 10px 12px; margin: 0; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; resize: vertical; }
-.simple-table th .simple-table-cell { font-weight: 600; }
+.simple-table-cell-editor { position: relative; min-width: 0; }
+.simple-table-cell,
+.simple-table-cell-measure {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  line-height: 1.5;
+  text-align: start;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.simple-table-cell-measure { visibility: hidden; pointer-events: none; }
+.simple-table-cell {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  resize: none;
+  overflow: hidden;
+}
+.simple-table th :is(.simple-table-cell, .simple-table-cell-measure) { font-weight: 600; }
 .simple-table-frame { position: relative; max-width: calc(100% - 20px); }
 .simple-table-column-resizer { position: absolute; top: 0; bottom: 0; right: -6px; width: 12px; cursor: col-resize; touch-action: none; user-select: none; z-index: 3; outline: none; }
 .simple-table tr:first-child > :last-child .simple-table-column-resizer { right: 0; }

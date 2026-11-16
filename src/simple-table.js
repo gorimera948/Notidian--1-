@@ -250,6 +250,14 @@ export function createSimpleTableDOM(block, onChange) {
           input.dataset.rowId = row.id; input.dataset.columnId = column.id;
           input.setAttribute('aria-label', `${ri + 1}行${ci + 1}列`);
           input.value = row.cells[column.id] || '';
+          const cellEditor = document.createElement('div');
+          cellEditor.className = 'simple-table-cell-editor';
+          const measure = document.createElement('div');
+          measure.className = 'simple-table-cell-measure';
+          measure.setAttribute('aria-hidden', 'true');
+          // Keep a final empty line measurable as well.
+          const updateMeasure = () => { measure.textContent = input.value + '\u200b'; };
+          updateMeasure();
           if (preview) { input.readOnly = true; input.tabIndex = -1; }
           else {
             input.addEventListener('focus', () => {
@@ -257,7 +265,11 @@ export function createSimpleTableDOM(block, onChange) {
               container.querySelectorAll('.is-active-cell').forEach(el => el.classList.remove('is-active-cell'));
               td.classList.add('is-active-cell');
             });
-            input.addEventListener('input', () => { row.cells[column.id] = input.value; save(false); });
+            input.addEventListener('input', () => {
+              updateMeasure();
+              row.cells[column.id] = input.value;
+              save(false);
+            });
             input.addEventListener('keydown', event => {
               if (event.key !== 'Tab' || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
               const next = ri * properties.columns.length + ci + (event.shiftKey ? -1 : 1);
@@ -270,7 +282,8 @@ export function createSimpleTableDOM(block, onChange) {
               }
             });
           }
-          td.appendChild(input);
+          cellEditor.append(measure, input);
+          td.appendChild(cellEditor);
           if (ri === 0 && !preview) {
             const handle = makeColumnHandle(ci); columnHandles.push(handle); td.appendChild(handle);
           }
