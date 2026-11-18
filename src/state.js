@@ -287,32 +287,20 @@ export function undo() {
   // 現在の状態を確実にヒストリへ追加して同期
   pushHistory();
 
-  // 戻そうとする状態が、現在の状態と「コンテンツ的に同じ」である間は、無駄な履歴（ミリ秒の更新など）なのでスタックから削除（pop）し続ける
-  const currentNotes = state.notes;
-  while (historyState.undoStack.length > 1) {
-    const prevStateStr = historyState.undoStack[historyState.undoStack.length - 1];
-    try {
-      const prevState = JSON.parse(prevStateStr);
-      if (!isSameContent(currentNotes, prevState)) {
-        break;
-      }
-    } catch (e) {
-      break;
-    }
-    historyState.undoStack.pop(); // コンテンツが同じなら無駄な履歴なのでスタックから捨てる
+  // Skip duplicate snapshots of the current content, then apply the first
+  // distinct snapshot. Keep the actual current state for redo.
+  const stack = historyState.undoStack;
+  const currentState = stack.at(-1);
+  let previous = stack.length - 2;
+  while (previous >= 0 && isSameContent(state.notes, JSON.parse(stack[previous]))) {
+    previous--;
   }
-
-  if (historyState.undoStack.length <= 1) return; // 初期状態のみ、または空の場合は戻せない
+  if (previous < 0) return;
 
   historyState.isApplying = true;
-
-  // 現在の状態をRedoスタックへ移動
-  const currentState = historyState.undoStack.pop();
+  stack.length = previous + 1;
   historyState.redoStack.push(currentState);
-
-  // 1つ前の状態を適用
-  const prevState = historyState.undoStack[historyState.undoStack.length - 1];
-  state.notes = JSON.parse(prevState);
+  state.notes = JSON.parse(stack[previous]);
 
   // ローカルストレージに保存し、エディタを再描画
   localStorage.setItem('notidian_notes', JSON.stringify(state.notes));

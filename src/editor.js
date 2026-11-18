@@ -3,6 +3,7 @@ import { generateId, escapeHTML } from './utils.js';
 import { createEditorSaveQueue } from './editor-save.js';
 import { preventUnfocusedBackspace, isEditableKeyboardTarget } from './editor-keyboard.js';
 import { createSimpleTableProperties, createSimpleTableDOM } from './simple-table.js';
+import { createFlowchartProperties, createFlowchartDOM } from './flowchart.js';
 import { parseWikiLinks, serializeHtmlToWikiText, handleWikiLinkTrigger, closeLinkMenu, selectLinkMenuItem, navigateLinkMenu, checkAndInsertPairBrackets } from './wikilinks.js';
 import { createDatabaseDOM, removeBlocksRecursively, updateBulkActionBar, updateBlockBulkActionBar } from './database.js';
 import {
@@ -1265,6 +1266,25 @@ export function createBlockDOM(block, parentBlock = null) {
     contentEl.style.display = 'none';
     blockWrapper.appendChild(contentEl);
 
+    return blockWrapper;
+  }
+
+  if (block.type === 'flowchart') {
+    const owner = state.notes.find(note => findBlockAndParent(note.blocks || [], block.id)?.block === block);
+    const chart = createFlowchartDOM(block, owner?.id, properties => {
+      const note = state.notes.find(note => note.id === owner?.id);
+      const current = note && findBlockAndParent(note.blocks || [], block.id)?.block;
+      if (current?.type !== 'flowchart') return false;
+      pushHistory();
+      current.properties = properties;
+      note.updatedAt = Date.now();
+      saveNotesToStorage();
+      renderEditor();
+      queueMicrotask(() => document.querySelector(`.block-flowchart-wrapper[data-id="${CSS.escape(block.id)}"] [data-flowchart-edit]`)
+        ?.focus({ preventScroll: true }));
+      return true;
+    });
+    blockWrapper.appendChild(chart);
     return blockWrapper;
   }
 
@@ -2577,7 +2597,7 @@ function selectSlashMenuItem() {
 
   // 入力中に混入したスラッシュや￥などのトリガー記号を一括で完全に削除する（IME確定ズレ対策）
   let text = activeContentDiv.textContent;
-  text = newType === 'simple-table'
+  text = ['simple-table', 'flowchart'].includes(newType)
     ? text.replace(/[\/／\\￥¥]$/, '')
     : text.replace(/[\/／\\￥¥]/g, '');
 
@@ -2606,6 +2626,13 @@ function selectSlashMenuItem() {
   if (newType === 'simple-table') {
     found.block.properties = createSimpleTableProperties();
     if (text) found.block.properties.rows[0].cells[found.block.properties.columns[0].id] = text;
+    found.block.content = '';
+    if (!found.parentArray[found.index + 1]) {
+      found.parentArray.push({ id: generateId(), type: 'p', content: '' });
+    }
+  }
+  if (newType === 'flowchart') {
+    found.block.properties = createFlowchartProperties(text);
     found.block.content = '';
     if (!found.parentArray[found.index + 1]) {
       found.parentArray.push({ id: generateId(), type: 'p', content: '' });
@@ -2648,6 +2675,10 @@ function selectSlashMenuItem() {
     }
     if (newType === 'simple-table') {
       document.querySelector(`.simple-table-container[data-block-id="${found.block.id}"] textarea`)?.focus();
+      return;
+    }
+    if (newType === 'flowchart') {
+      document.querySelector(`.block-flowchart-wrapper[data-id="${CSS.escape(found.block.id)}"] [data-flowchart-edit]`)?.focus();
       return;
     }
     // データベース、画像、区切り線の場合は非表示DOMとなりフォーカスできないため、処理をスキップ（ブラウザフリーズ防止）

@@ -324,13 +324,19 @@ async function applyRemoteSnapshot(snapshot) {
   }
 }
 
-function activeNotesChanged(snapshot) {
-  const ids = new Set([state.activeNoteId, ...(state.panes || []).map(pane => pane.activeNoteId)].filter(Boolean));
+function notesChanged(snapshot, ids) {
   return [...ids].some(id => canonicalJSON(state.notes.find(note => note.id === id)) !==
     canonicalJSON(snapshot.data.notes.find(note => note.id === id)));
 }
 
+function activeNotesChanged(snapshot) {
+  const ids = new Set([state.activeNoteId, ...(state.panes || []).map(pane => pane.activeNoteId)].filter(Boolean));
+  return notesChanged(snapshot, ids);
+}
+
 function canApplySnapshot(snapshot) {
+  const openChart = globalThis.document?.querySelector?.('dialog[data-flowchart-note][open]');
+  if (openChart?.dataset.flowchartNote && notesChanged(snapshot, [openChart.dataset.flowchartNote])) return false;
   if (!activeNotesChanged(snapshot)) return true;
   if (state.isComposing) return false;
   const active = globalThis.document?.activeElement;

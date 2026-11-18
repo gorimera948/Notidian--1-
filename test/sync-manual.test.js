@@ -62,6 +62,16 @@ test('manual sync merges both versions, downloads on a new device, and creates f
   uploads.length = 0;
 
   local = sample;
+  const openChartSelector = 'dialog[data-flowchart-note][open]';
+  globalThis.document = {
+    querySelector: selector => selector === openChartSelector ? { dataset: { flowchartNote: 'pc-note' } } : null
+  };
+  await sync.syncNow({ reason: 'manual' });
+  assert.equal(sync.getDropboxSyncState().status, 'pending');
+  assert.deepEqual(local, sample);
+  assert.equal(uploads.length, 0);
+
+  delete globalThis.document;
   await sync.syncNow({ reason: 'manual' });
   assert.equal(sync.getDropboxSyncState().status, 'synced');
   assert.deepEqual(local, remote);
