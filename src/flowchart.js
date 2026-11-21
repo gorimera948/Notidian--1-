@@ -154,7 +154,7 @@ function createBoard(chart, interactions) {
       const text = svgElement('text', { class: 'flowchart-edge-label', 'text-anchor': 'middle' });
       let hit;
       group.append(line, text);
-      if (interactions) {
+      if (interactions?.edge) {
         hit = svgElement('path', { class: 'flowchart-edge-hit', tabindex: 0, role: 'button' });
         hit.setAttribute('aria-label', `矢印: ${nodes.get(edge.from).label} → ${nodes.get(edge.to).label}`);
         hit.addEventListener('click', () => interactions.edge(edge));
@@ -174,7 +174,7 @@ function createBoard(chart, interactions) {
       el.appendChild(element('span', 'flowchart-node-label', node.label || TYPES[node.type]));
       if (interactions) {
         el.setAttribute('aria-label', `${TYPES[node.type]}: ${node.label || '無題'}`);
-        interactions.drag(el, node);
+        interactions.drag?.(el, node);
       }
       board.appendChild(el);
       nodeElements.set(node.id, el);
@@ -192,7 +192,7 @@ function createBoard(chart, interactions) {
   } };
 }
 
-function openFlowchartEditor(properties, noteId, onSave) {
+function openFlowchartEditor(properties, noteId, onSave, initialNodeId) {
   if (!noteId || document.querySelector('.flowchart-dialog[open]')) return;
   const chart = validChart(properties);
   const original = JSON.stringify(chart);
@@ -211,6 +211,11 @@ function openFlowchartEditor(properties, noteId, onSave) {
   let selected = null, connecting = false, from = null;
 
   const setStatus = text => { status.textContent = text; };
+  const focusLabel = () => {
+    const input = inspector.querySelector('input');
+    input?.focus({ preventScroll: true });
+    input?.select();
+  };
   const endConnect = () => {
     from = null;
     connecting = false;
@@ -277,11 +282,15 @@ function openFlowchartEditor(properties, noteId, onSave) {
     }
     selected = { kind: 'node', id: node.id };
     refreshSelection();
-    setStatus('図形を選択しました。');
+    setStatus('「図形の文字」を変更して「保存」を押してください。');
   };
 
   const diagram = createBoard(chart, {
-    node: selectNode,
+    node(node) {
+      const wasConnecting = connecting;
+      selectNode(node);
+      if (!wasConnecting) focusLabel();
+    },
     edge(edge) {
       if (connecting) return;
       selected = { kind: 'edge', id: edge.id };
@@ -369,7 +378,7 @@ function openFlowchartEditor(properties, noteId, onSave) {
   });
   connect.setAttribute('aria-pressed', 'false');
   tools.appendChild(connect);
-  setStatus('図形はドラッグで移動できます。');
+  setStatus('図形をタップして文字を編集。ドラッグで移動できます。');
 
   const cancel = () => {
     if (JSON.stringify(chart) !== original && !window.confirm('保存していない変更を破棄しますか？')) return;
@@ -395,6 +404,12 @@ function openFlowchartEditor(properties, noteId, onSave) {
   }, { once: true });
   document.body.appendChild(dialog);
   dialog.showModal();
+  const initialNode = chart.nodes.find(node => node.id === initialNodeId);
+  if (initialNode) {
+    selectNode(initialNode);
+    diagram.nodeElements.get(initialNode.id)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    focusLabel();
+  }
 }
 
 export function createFlowchartDOM(block, noteId, onSave) {
@@ -409,7 +424,10 @@ export function createFlowchartDOM(block, noteId, onSave) {
   header.append(title, edit);
   const chart = validChart(block.properties);
   if (chart.nodes.length) {
-    const preview = createBoard(chart);
+    const preview = createBoard(chart, {
+      node: node => openFlowchartEditor(block.properties, noteId, onSave, node.id)
+    });
+    preview.scroller.title = '図形をタップして文字を編集';
     preview.scroller.setAttribute('aria-label', 'フローチャートのプレビュー');
     preview.scroller.tabIndex = 0;
     container.append(header, preview.scroller);

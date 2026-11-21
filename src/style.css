@@ -5927,6 +5927,7 @@ tr.db-data-row:hover .db-row-hover-toolbar {
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+.flowchart-block button.flowchart-node { cursor: pointer; }
 .flowchart-node-terminal { border-radius: 40px; background: #173a38; border-color: #66c9b7; }
 .flowchart-node-decision {
   background: transparent;
